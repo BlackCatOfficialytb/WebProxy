@@ -2,19 +2,36 @@
 
 A dependency-free Node server that exposes an **OpenAI-compatible** `/v1` API on
 `http://localhost:16769`, routing only to **consumer web-chat providers** (the
-sites you log into with a browser session cookie/token, used for free). Modeled on
-9Router's single-endpoint shape, but scoped to web providers.
+sites you log into with a browser session cookie/token, used for free).
+
+**This is a standalone tool.** It has zero connection to 9Router's codebase and
+cannot be merged into it — 9Router is a full-featured AI gateway with hundreds
+of API-key providers, OAuth flows, combos, and a Next.js frontend. WebProxy
+exists because web-session providers (Kimi, ChatGLM, Qwen, etc.) require
+browser-cookie reverse-proxying that doesn't fit 9Router's architecture.
+
+**Recommended:** run WebProxy alongside 9Router. Point both at the same model
+names and let 9Router handle routing, fallback, and your API-key providers while
+WebProxy fills the free web-session tier. Example combo:
+
+```
+9Router (localhost:16760)          WebProxy (localhost:16769)
+├── OpenAI (api-key)               ├── kimi-web / kimi-k3
+├── Anthropic (api-key)            ├── qwen-web / qwen3.7-max
+├── Gemini (oauth)                 ├── deepseek-web
+└── ...                            └── ...
+```
 
 ## Supported web providers
 
-| Provider id   | Site / auth                                                        |
-| ------------- | ------------------------------------------------------------------ |
-| `kimi-web`    | www.kimi.com — `access_token` (localStorage)                       |
-| `zai-web`     | chat.z.ai — `token` cookie (Z.AI / GLM international)              |
-| `chatglm-web` | chatglm.cn — `chatglm_session` cookie (Zhipu mainland)             |
-| `deepseek-web`| chat.deepseek.com — `userToken` (localStorage)                     |
-| `doubao-web`  | www.dola.com — session cookie                                      |
-| `qwen-web`    | chat.qwen.ai — full Cookie header + `token`                        |
+| Provider id    | Site / auth                                                       | Models |
+| -------------- | ----------------------------------------------------------------- | ------ |
+| `kimi-web`     | www.kimi.com — `access_token` (localStorage) or `kimi-auth` cookie | kimi-k2.6, kimi-k3, kimi-k3-swarm |
+| `zai-web`      | chat.z.ai — `token` cookie (Z.AI / GLM international)             | glm-4.6, glm-4.7, glm-4.6v |
+| `chatglm-web`  | chatglm.cn — `chatglm_session` cookie (Zhipu mainland)            | glm-4-plus, glm-4-air, glm-4-flash, glm-4v |
+| `deepseek-web` | chat.deepseek.com — `userToken` (localStorage)                    | deepseek-chat, deepseek-reasoner |
+| `doubao-web`   | www.dola.com — session cookie                                     | dola-speed, dola-pro, dola-deep-think |
+| `qwen-web`     | chat.qwen.ai — full Cookie header + `token`                       | qwen3.7-max, qwen3.7-plus, qwen3.6-plus, qwen3-coder-plus |
 
 All run **unauthenticated locally** (it only listens on localhost). Each provider
 needs one credential pasted from your browser.
@@ -56,7 +73,7 @@ curl -sS -X DELETE http://localhost:16769/api/connections/kimi-web/0
 ```bash
 curl -sS http://localhost:16769/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"provider":"kimi-web","model":"kimi-k2","stream":true,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"provider":"kimi-web","model":"kimi-k3","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
 - `provider` selects which web site to hit (required; no key needed on the request).
@@ -76,6 +93,7 @@ curl -sS http://localhost:16769/v1/chat/completions \
 
 - Credentials are kept **in memory only** (lost on restart). Never expose the port.
 - This is a reverse proxy to third-party web UIs; respect each site's ToS.
+- Kimi conversations are automatically deleted after each request.
 - `chatglm-web` uses the chatglm.cn consumer endpoint; if Zhipu changes it, update
   `CHATGLM_URL` in `providers/chatglm.mjs`.
 
