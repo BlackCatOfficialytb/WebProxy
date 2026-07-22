@@ -7,7 +7,6 @@ import { chatglmWeb } from "./providers/chatglm.mjs";
 import { deepseekWeb } from "./providers/deepseek.mjs";
 import { doubaoWeb } from "./providers/doubao.mjs";
 import { qwenWeb } from "./providers/qwen.mjs";
-import { errorPayload } from "./shared.mjs";
 import { renderUI } from "./ui.mjs";
 
 const PROVIDERS = [kimiWeb, zaiWeb, chatglmWeb, deepseekWeb, doubaoWeb, qwenWeb];
@@ -23,10 +22,15 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (c) => (data += c));
+    let size = 0;
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > maxBytes) { req.destroy(); return reject(new Error("Request body too large")); }
+      data += c;
+    });
     req.on("end", () => {
       if (!data) return resolve({});
       try { resolve(JSON.parse(data)); } catch { reject(new Error("invalid JSON body")); }
@@ -78,22 +82,36 @@ async function handleChat(req, res) {
       const result = await provider.chat({ credential: entry.cred, model, messages, stream, signal: ac.signal });
       if (result.error) {
         lastError = result.error;
-        const status = result.error.status || 500;
-        if (status !== 401 && status !== 403 && status !== 429) {
+        const errStatus = result.error.status || 500;
+        if (errStatus !== 401 && errStatus !== 403 && errStatus !== 429) {
           req.removeListener("close", onClose);
-          return result.error;
+          return sendJson(res, errStatus, { error: { message: result.error.message || "upstream error" } });
         }
         continue;
       }
       req.removeListener("close", onClose);
-      if (result.stream) return result.stream;
+      if (result.stream) {
+        const upstreamResp = result.stream;
+        res.writeHead(upstreamResp.status || 200, Object.fromEntries(upstreamResp.headers));
+        const reader = upstreamResp.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!res.destroyed) res.write(value);
+          }
+        } catch { /* client disconnected */ }
+        if (!res.destroyed) res.end();
+        return;
+      }
       return sendJson(res, 200, result.json);
     } catch (e) {
-      lastError = errorPayload(502, e.message);
+      lastError = { status: 502, message: e.message };
       req.removeListener("close", onClose);
     }
   }
-  return lastError || errorPayload(502, "All credentials failed");
+  const err = lastError || { status: 502, message: "All credentials failed" };
+  return sendJson(res, err.status || 500, { error: { message: err.message } });
 }
 
 function maskCred(c) {
@@ -168,8 +186,7 @@ async function handleTestCredential(req, res, id, index) {
       clearTimeout(t);
       if (result.error) {
         entry.status = "failed";
-        const status = result.error.status || 500;
-        return sendJson(res, status, { valid: false, message: "credential rejected" });
+        return sendJson(res, result.error.status || 500, { valid: false, message: result.error.message || "credential rejected" });
       }
       entry.status = "active";
       return sendJson(res, 200, { valid: true });
@@ -194,14 +211,26 @@ function uiHtml() {
   return renderUI(PROVIDERS, HOST, PORT);
 }
 
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+const SEC_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "X-XSS-Protection": "1; mode=block",
+  "Referrer-Policy": "no-referrer",
+};
+
+const server = http.createServer(async (req, res) => {
+  for (const [k, v] of Object.entries(SEC_HEADERS)) res.setHeader(k, v);
+
+  const url = new URL(req.url, `http://${HOST}:${PORT}`);
   const path = url.pathname;
 
   if (req.method === "GET" && path === "/api/health") return sendJson(res, 200, { ok: true });
   if (req.method === "GET" && path === "/v1/models") return sendJson(res, 200, { object: "list", data: buildModelsList() });
   if (req.method === "GET" && path === "/api/endpoint") return sendJson(res, 200, endpointInfo());
-  if (path === "/v1/chat/completions") return handleChat(req, res);
+  if (path === "/v1/chat/completions") {
+    if (req.method !== "POST") return sendJson(res, 405, { error: { message: "Method not allowed" } });
+    return handleChat(req, res);
+  }
   if (path === "/api/connections" || /^\/api\/connections\/[^/]+\/\d+/.test(path)) {
     if (req.method === "DELETE") {
       const m = path.match(/^\/api\/connections\/([^/]+)\/(\d+)$/);

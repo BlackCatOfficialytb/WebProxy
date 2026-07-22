@@ -77,6 +77,7 @@ export function makeSseStream(model, onDelta) {
   const id = newChunkId();
   const created = Math.floor(Date.now() / 1000);
   let roleEmitted = false;
+  let finished = false;
   const emit = (controller, delta, finish = null) => {
     controller.enqueue(
       encoder.encode(
@@ -96,11 +97,15 @@ export function makeSseStream(model, onDelta) {
           },
           content: (t) => t && emit(controller, { content: t }),
           reasoning: (t) => t && emit(controller, { reasoning_content: t }),
-          finish: () => emit(controller, {}, "stop"),
+          finish: () => {
+            if (!finished) { finished = true; emit(controller, {}, "stop"); }
+          },
         });
         if (!roleEmitted) emit(controller, { role: "assistant", content: "" });
-        emit(controller, {}, "stop");
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        if (!finished) {
+          emit(controller, {}, "stop");
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        }
         controller.close();
       } catch (err) {
         controller.error(err);
@@ -124,10 +129,7 @@ export function jsonCompletion(model, content, reasoning) {
 }
 
 export function errorPayload(status, message) {
-  return new Response(JSON.stringify({ error: { message, type: "upstream_error" } }), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
+  return { status, message };
 }
 
 /** Fold OpenAI messages -> single "role: text" transcript (web UIs take one prompt). */

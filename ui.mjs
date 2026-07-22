@@ -135,6 +135,19 @@ nav{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
 .ep-row code{font-size:13px;color:var(--info);background:var(--bg-alt);padding:2px 8px;border-radius:4px;font-family:ui-monospace,monospace}
 .providers-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
 .material-symbols-outlined{font-family:'Material Symbols Outlined';font-weight:normal;font-style:normal;font-size:24px;line-height:1;letter-spacing:normal;text-transform:none;display:inline-block;white-space:nowrap;word-wrap:normal;direction:ltr;font-feature-settings:'liga';-webkit-font-feature-settings:'liga';-webkit-font-smoothing:antialiased;font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24}
+.sidebar-toggle{display:none;background:transparent;border:0;color:var(--text);cursor:pointer;padding:4px;border-radius:6px}
+.sidebar-toggle:hover{background:var(--surface-2)}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:39}
+.sidebar-overlay.open{display:block}
+@media(max-width:768px){
+  .sidebar{position:fixed;left:-280px;top:0;bottom:0;z-index:40;transition:left .25s ease}
+  .sidebar.open{left:0}
+  .sidebar-toggle{display:flex}
+  .providers-grid{grid-template-columns:1fr}
+  .chat-wrap{height:calc(100vh - 100px)}
+  .content{padding:16px}
+  .header{padding:12px 16px}
+}
 </style>
 </head>
 <body>
@@ -148,9 +161,10 @@ nav{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
     <nav>${sidebarNav}</nav>
     <div class="sidebar-footer"><div class="dot"></div><span id="health">connecting…</span></div>
   </aside>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
   <div class="main">
     <div class="grid-bg"></div>
-    <div class="header"><h2 id="page-title">Providers</h2></div>
+    <div class="header"><button class="sidebar-toggle" id="sidebar-toggle"><span class="material-symbols-outlined">menu</span></button><h2 id="page-title">Providers</h2></div>
     <div class="content">
       <div class="page active" id="page-providers"><div class="providers-grid">${providerCards}</div></div>
       <div class="page" id="page-chat">
@@ -211,7 +225,7 @@ function showPage(id){
   $("page-title").textContent=titles[id]||id;
 }
 
-document.querySelectorAll(".nav-item").forEach(n=>n.addEventListener("click",()=>showPage(n.dataset.page)));
+document.querySelectorAll(".nav-item").forEach(n=>n.addEventListener("click",()=>{showPage(n.dataset.page);sidebarEl.classList.remove("open");overlayEl.classList.remove("open");}));
 
 async function refresh(){
   const r=await fetch(API+"/api/connections"); const d=await r.json(); CONNS=d.connections;
@@ -296,6 +310,8 @@ async function sendChat(){
         for(const l of lines){ if(!l.startsWith("data:")) continue; const p=l.slice(5).trim(); if(!p||p==="[DONE]") continue;
           try{ const o=JSON.parse(p); const dl=o.choices&&o.choices[0]&&o.choices[0].delta; if(!dl) continue;
             if(dl.content) acc+=dl.content; if(dl.reasoning_content) acc+="[think]"+dl.reasoning_content+"[/think]"; tail.textContent=acc; log.scrollTop=log.scrollHeight; }catch(e){} } }
+      if(buf.trim()){const p=buf.trim(); if(p.startsWith("data:")){const d=p.slice(5).trim(); if(d&&d!=="[DONE]") try{const o=JSON.parse(d);const dl=o.choices&&o.choices[0]&&o.choices[0].delta;if(dl){if(dl.content)acc+=dl.content;if(dl.reasoning_content)acc+="[think]"+dl.reasoning_content+"[/think]";}}catch(e){}}}
+      tail.textContent=acc||"(empty)"; log.scrollTop=log.scrollHeight;
     } else { const j=await r.json(); tail.textContent=(j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||JSON.stringify(j); }
   }catch(e){ tail.className="msg-err"; tail.textContent="Error: "+e.message; }
   $("chat-prompt").value=""; log.scrollTop=log.scrollHeight;
@@ -313,6 +329,10 @@ $("chat-provider").addEventListener("change",fillModels);
 $("chat-send").addEventListener("click",sendChat);
 $("chat-prompt").addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="Enter") sendChat();});
 $("modal-overlay").addEventListener("click",e=>{if(e.target===$("modal-overlay")) closeModal();});
+const sidebarEl=document.querySelector(".sidebar");
+const overlayEl=$("sidebar-overlay");
+$("sidebar-toggle").addEventListener("click",()=>{sidebarEl.classList.toggle("open");overlayEl.classList.toggle("open");});
+overlayEl.addEventListener("click",()=>{sidebarEl.classList.remove("open");overlayEl.classList.remove("open");});
 fetch(API+"/api/health").then(r=>r.json()).then(d=>$("health").textContent=d.ok?"online":"offline").catch(()=>$("health").textContent="offline");
 refresh();
 </script>

@@ -1,5 +1,5 @@
 // zai-web — chat.z.ai (Z.AI / GLM international consumer chat). OpenAI-shaped SSE.
-import { UA, extractCookieValue, foldMessages, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload } from "../shared.mjs";
+import { UA, extractCookieValue, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload } from "../shared.mjs";
 
 const BASE = "https://chat.z.ai";
 const CHAT_URL = `${BASE}/api/chat/completions`;
@@ -18,15 +18,10 @@ export const zaiWeb = {
     const reqBody = {
       stream: true,
       model,
-      messages: foldMessages(messages).split("\n\n").map((t, i) => ({
-        role: i === 0 && t.startsWith("User:") ? "user" : i === 0 ? "system" : "user",
-        content: t.replace(/^(User:|Assistant:|System|Tool result):\s*/, ""),
-      })),
+      messages: (messages || []).map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) })),
       params: {},
       features: { image_generation: false, web_search: false, auto_web_search: false },
     };
-    // Simpler: send messages verbatim; z.ai accepts the OpenAI messages array.
-    reqBody.messages = (messages || []).map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }));
 
     const headers = {
       "Content-Type": "application/json",
