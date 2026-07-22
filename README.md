@@ -99,5 +99,7 @@ curl -sS http://localhost:16769/v1/chat/completions \
 
 ## License
 
-Public domain — released under [The Unlicense](LICENSE) (also CC0-1.0). No Apache,
-MIT, or GPL terms apply; do whatever you want with it.
+Public domain — released under [The Unlicense](LICENSE) (also CC0-1.0) from
+day one. This tool was pulled from OmniRoute (which uses AGPL-3.0) and
+immediately relicensed as Unlicensed/CC0 before any public release. No Apache,
+MIT, GPL, or AGPL terms apply; do whatever you want with it.
