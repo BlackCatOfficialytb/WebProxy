@@ -1,15 +1,46 @@
 // kimi-web — www.kimi.com Connect-RPC chat (international Kimi / Moonshot consumer).
+// Models: K2.6, K3, K3 Swarm. Conversations are deleted after each request.
 import { UA, extractKimiCredential, foldMessages, makeSseStream, jsonCompletion, errorPayload } from "../shared.mjs";
 
 const BASE = "https://www.kimi.com";
 const CHAT_URL = `${BASE}/apiv2/kimi.gateway.chat.v1.ChatService/Chat`;
+const DELETE_URL = `${BASE}/api/chat`;
+
+// Model → scenario + kimiplus_id mapping (from live GetAvailableModels + OmniRoute OEM).
+const MODEL_CONFIG = {
+  "kimi-k2.6":      { scenario: "SCENARIO_K2D5" },
+  "kimi-k3":        { scenario: "SCENARIO_OK_COMPUTER", kimiPlusId: "ok-computer" },
+  "kimi-k3-swarm":  { scenario: "SCENARIO_OK_COMPUTER", kimiPlusId: "ok-computer" },
+};
+const DEFAULT_MODEL = "kimi-k3";
+
+function resolveConfig(model) {
+  return MODEL_CONFIG[model] || MODEL_CONFIG[DEFAULT_MODEL];
+}
+
+// Fire-and-forget: delete the conversation after streaming/non-streaming completes.
+async function deleteChat(chatId, authHeader, signal) {
+  if (!chatId) return;
+  try {
+    await fetch(`${DELETE_URL}/${chatId}`, {
+      method: "DELETE",
+      headers: {
+        "User-Agent": UA,
+        Origin: BASE,
+        Referer: `${BASE}/`,
+        ...authHeader,
+      },
+      signal,
+    });
+  } catch { /* best-effort */ }
+}
 
 export const kimiWeb = {
   id: "kimi-web",
   label: "Kimi (www.kimi.com)",
   credentialHint: "access_token (localStorage) or kimi-auth cookie",
   howto: "1) Log in at www.kimi.com. 2a) DevTools → Application → Local Storage → https://www.kimi.com → copy `access_token`. 2b) Or DevTools → Application → Cookies → www.kimi.com → copy `kimi-auth` value. 3) Paste either value here (a `Bearer <token>` or `access_token=<v>` or `kimi-auth=<v>` string also works).",
-  models: ["kimi-k2", "kimi-k2-5", "kimi-k2-6"],
+  models: Object.keys(MODEL_CONFIG),
   async chat({ credential, model, messages, stream, signal }) {
     const { mode, value } = extractKimiCredential(credential);
     if (!value) return { error: errorPayload(400, "Missing Kimi credential — paste access_token from localStorage or kimi-auth cookie.") };
@@ -17,9 +48,11 @@ export const kimiWeb = {
     const prompt = foldMessages(messages);
     if (!prompt) return { error: errorPayload(400, "Kimi Web requires a non-empty user message.") };
 
+    const config = resolveConfig(model);
     const body = JSON.stringify({
       chat_id: "",
-      scenario: "chat",
+      ...(config.kimiPlusId ? { kimiplus_id: config.kimiPlusId } : {}),
+      scenario: config.scenario,
       tools: [],
       message: {
         id: "",
@@ -27,7 +60,7 @@ export const kimiWeb = {
         children_message_ids: [],
         role: "user",
         blocks: [{ id: "", message_id: "", text: { content: prompt } }],
-        scenario: "chat",
+        scenario: config.scenario,
         labels: [],
         references: [],
         is_goal: false,
@@ -98,12 +131,19 @@ export const kimiWeb = {
       }
       return null;
     };
+    // Extract chat_id from any frame that carries it (for post-request cleanup).
+    const extractChatId = (m) => {
+      if (!m) return null;
+      const id = m.chat_id || m.id;
+      return typeof id === "string" && id ? id : null;
+    };
 
     if (stream) {
       const sse = makeSseStream(model, async (emit) => {
         const reader = upstream.body.getReader();
         let buf = new Uint8Array(0);
         let ended = false;
+        let chatId = null;
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -115,6 +155,8 @@ export const kimiWeb = {
             if (consumed === 0) break;
             off += consumed;
             if (flags & 0x02) { ended = true; break; }
+            const cid = extractChatId(msg);
+            if (cid) chatId = cid;
             const d = extractDelta(msg);
             if (d) { emit.role(); d.kind === "think" ? emit.reasoning(d.text) : emit.content(d.text); }
           }
@@ -122,6 +164,7 @@ export const kimiWeb = {
           if (ended) break;
         }
         emit.finish();
+        deleteChat(chatId, authHeader, signal);
       });
       return { stream: new Response(sse, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } }) };
     }
@@ -131,6 +174,7 @@ export const kimiWeb = {
     let buf = new Uint8Array(0);
     let content = "";
     let reasoning = "";
+    let chatId = null;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -142,11 +186,14 @@ export const kimiWeb = {
         if (consumed === 0) break;
         off += consumed;
         if (flags & 0x02) break;
+        const cid = extractChatId(msg);
+        if (cid) chatId = cid;
         const d = extractDelta(msg);
         if (d) d.kind === "think" ? (reasoning += d.text) : (content += d.text);
       }
       buf = buf.subarray(off);
     }
+    deleteChat(chatId, authHeader, signal);
     return { json: jsonCompletion(model, content, reasoning) };
   },
 };
