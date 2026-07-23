@@ -1,0 +1,17 @@
+{
+  "name": "webproxy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenAI-compatible /v1 gateway for free web-chat providers (9Router-style dashboard)",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "animejs": "^4.5.0",
+    "axios": "^1.7.9",
+    "bcrypt": "^6.0.0",
+    "better-sqlite3": "^13.0.1"
+  }
+}

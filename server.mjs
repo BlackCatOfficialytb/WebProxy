@@ -1,18 +1,8 @@
 // WebProxy server — OpenAI-compatible /v1 gateway for web-chat providers.
-// Listens on localhost (default :16769). No external dependencies.
-import http from "node:http";
-import { kimiWeb } from "./providers/kimi.mjs";
-import { zaiWeb } from "./providers/zai.mjs";
-import { chatglmWeb } from "./providers/chatglm.mjs";
-import { deepseekWeb } from "./providers/deepseek.mjs";
-import { doubaoWeb } from "./providers/doubao.mjs";
-import { qwenWeb } from "./providers/qwen.mjs";
-import { renderUI } from "./ui.mjs";
-
-const PROVIDERS = [kimiWeb, zaiWeb, chatglmWeb, deepseekWeb, doubaoWeb, qwenWeb];
-const BY_ID = Object.fromEntries(PROVIDERS.map((p) => [p.id, p]));
-// provider id -> array of { name, cred, priority, status } (multiple sessions; tried in priority order / failover)
-const credentials = new Map();
+// Listens on localhost (default :16769). Requires axios.
+// Store SQLite imports at top for server.ts base
+import db from "./db.mjs";
+import { hashPassword, verifyPassword, getSalt } from "./auth.mjs";
 
 const PORT = Number(process.env.PORT) || 16769;
 const HOST = process.env.HOST || "127.0.0.1";

@@ -1,5 +1,5 @@
 // zai-web — chat.z.ai (Z.AI / GLM international consumer chat). OpenAI-shaped SSE.
-import { UA, extractCookieValue, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload } from "../shared.mjs";
+import { axios, UA, extractCookieValue, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload, nodeStreamToWeb } from "../shared.mjs";
 
 const BASE = "https://chat.z.ai";
 const CHAT_URL = `${BASE}/api/chat/completions`;
@@ -8,7 +8,7 @@ export const zaiWeb = {
   id: "zai-web",
   label: "Z.AI Web (chat.z.ai / GLM)",
   credentialHint: "token=<JWT> cookie from chat.z.ai",
-  howto: "1) Log in at chat.z.ai. 2) Open DevTools → Application → Cookies → https://chat.z.ai. 3) Copy the `token` cookie (a JWT). 4) Paste `token=<JWT>` or the full Cookie header here.",
+  howto: "1) Log in at chat.z.ai.\n2) Open DevTools → Application → Cookies → https://chat.z.ai.\n3) Copy the `token` cookie (a JWT).\n4) Paste `token=<JWT>` or the full Cookie header here.",
   models: ["glm-4.6", "glm-4.7", "glm-4.6v"],
   async chat({ credential, model, messages, stream, signal }) {
     const rawCookie = credential.trim();
@@ -33,11 +33,22 @@ export const zaiWeb = {
     if (rawCookie) headers.Cookie = rawCookie;
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const upstream = await fetch(CHAT_URL, { method: "POST", headers, body: JSON.stringify(reqBody), signal });
-    if (!upstream.ok) {
-      const txt = await upstream.text().catch(() => "");
-      return { error: errorPayload(upstream.status, `Z.ai error: ${txt.slice(0, 300)}`) };
+    let upstream;
+    try {
+      upstream = await axios({
+        method: "POST",
+        url: CHAT_URL,
+        headers,
+        data: JSON.stringify(reqBody),
+        responseType: "stream",
+        signal,
+      });
+    } catch (e) {
+      const status = e.response?.status || 502;
+      const txt = e.response?.data ? await e.response.data.text?.().catch(() => "") || "" : e.message;
+      return { error: errorPayload(status, `Z.ai error: ${txt.slice(0, 300)}`) };
     }
+    const upstreamStream = nodeStreamToWeb(upstream.data);
 
     const parseFrame = (obj) => {
       const choices = obj.choices;
@@ -58,7 +69,7 @@ export const zaiWeb = {
 
     if (stream) {
       const sse = makeSseStream(model, async (emit) => {
-        for await (const obj of jsonLinesFromSse(upstream.body)) {
+        for await (const obj of jsonLinesFromSse(upstreamStream)) {
           const d = parseFrame(obj);
           if (!d) continue;
           emit.role();
@@ -71,7 +82,7 @@ export const zaiWeb = {
     }
 
     let content = ""; let reasoning = "";
-    for await (const obj of jsonLinesFromSse(upstream.body)) {
+    for await (const obj of jsonLinesFromSse(upstreamStream)) {
       const d = parseFrame(obj);
       if (!d) continue;
       content += d.content; reasoning += d.reasoning;

@@ -1,5 +1,5 @@
 // deepseek-web — chat.deepseek.com consumer chat. userToken (localStorage) -> access token.
-import { UA, extractBearer, foldMessages, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload } from "../shared.mjs";
+import { axios, UA, extractBearer, foldMessages, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload, nodeStreamToWeb } from "../shared.mjs";
 
 const BASE = "https://chat.deepseek.com";
 const API = `${BASE}/api`;
@@ -10,9 +10,8 @@ const tokenCache = new Map();
 
 async function acquireToken(userToken, signal) {
   if (tokenCache.has(userToken)) return tokenCache.get(userToken);
-  const r = await fetch(`${API}/v0/users/current`, { headers: { Authorization: `Bearer ${userToken}`, "User-Agent": UA }, signal });
-  if (!r.ok) throw new Error("DeepSeek token invalid/expired");
-  const j = await r.json();
+  const r = await axios({ url: `${API}/v0/users/current`, headers: { Authorization: `Bearer ${userToken}`, "User-Agent": UA }, signal });
+  const j = r.data;
   const t = j?.data?.biz_data?.token || j?.biz_data?.token;
   if (!t) throw new Error("DeepSeek token not found");
   tokenCache.set(userToken, t);
@@ -23,7 +22,7 @@ export const deepseekWeb = {
   id: "deepseek-web",
   label: "DeepSeek (chat.deepseek.com)",
   credentialHint: "userToken from chat.deepseek.com localStorage",
-  howto: "1) Log in at chat.deepseek.com. 2) Open DevTools → Application → Local Storage → https://chat.deepseek.com. 3) Copy the `userToken` value (it is JSON like {\"value\":\"...\"}). 4) Paste it here as-is.",
+  howto: "1) Log in at chat.deepseek.com.\n2) Open DevTools → Application → Local Storage → https://chat.deepseek.com.\n3) Copy the `userToken` value (it is JSON like {\"value\":\"...\"}).\n4) Paste it here as-is.",
   models: ["deepseek-chat", "deepseek-reasoner"],
   async chat({ credential, model, messages, stream, signal }) {
     const userToken = extractBearer(credential);
@@ -36,13 +35,26 @@ export const deepseekWeb = {
     const prompt = foldMessages(messages);
     if (!prompt) return { error: errorPayload(400, "DeepSeek requires a non-empty message.") };
 
-    const sessionR = await fetch(NEW_URL, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}`, "User-Agent": UA }, body: "{}", signal });
-    const sid = (await sessionR.json())?.data?.biz_data?.chat_session?.id;
+    const sessionR = await axios({ method: "POST", url: NEW_URL, headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}`, "User-Agent": UA }, data: "{}", signal });
+    const sid = sessionR.data?.data?.biz_data?.chat_session?.id;
     if (!sid) return { error: errorPayload(502, "DeepSeek session create failed") };
 
     const reqBody = { chat_session_id: sid, parent_message_id: null, model_type: "default", prompt, ref_file_ids: [], thinking_enabled: thinking, search_enabled: false, preempt: false };
-    const upstream = await fetch(COMPLETION_URL, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}`, "User-Agent": UA, Accept: "text/event-stream" }, body: JSON.stringify(reqBody), signal });
-    if (!upstream.ok) return { error: errorPayload(upstream.status, `DeepSeek error: ${upstream.status}`) };
+    let upstream;
+    try {
+      upstream = await axios({
+        method: "POST",
+        url: COMPLETION_URL,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}`, "User-Agent": UA, Accept: "text/event-stream" },
+        data: JSON.stringify(reqBody),
+        responseType: "stream",
+        signal,
+      });
+    } catch (e) {
+      const status = e.response?.status || 502;
+      return { error: errorPayload(status, `DeepSeek error: ${status}`) };
+    }
+    const upstreamStream = nodeStreamToWeb(upstream.data);
 
     // DeepSeek web SSE: {p, v} frames; v.response.fragments[].content with type THINK/ANSWER.
     const parseFrame = (obj) => {
@@ -70,7 +82,7 @@ export const deepseekWeb = {
 
     if (stream) {
       const sse = makeSseStream(model, async (emit) => {
-        for await (const obj of jsonLinesFromSse(upstream.body)) {
+        for await (const obj of jsonLinesFromSse(upstreamStream)) {
           const d = parseFrame(obj);
           if (!d) continue;
           emit.role();
@@ -83,7 +95,7 @@ export const deepseekWeb = {
     }
 
     let content = ""; let reasoning = "";
-    for await (const obj of jsonLinesFromSse(upstream.body)) {
+    for await (const obj of jsonLinesFromSse(upstreamStream)) {
       const d = parseFrame(obj);
       if (!d) continue;
       content += d.content; reasoning += d.reasoning;

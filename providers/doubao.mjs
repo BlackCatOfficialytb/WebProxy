@@ -1,5 +1,5 @@
 // doubao-web — www.dola.com (Doubao global consumer chat). Full session cookie.
-import { UA, fullCookieHeader, foldMessages, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload } from "../shared.mjs";
+import { axios, UA, fullCookieHeader, foldMessages, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload, nodeStreamToWeb } from "../shared.mjs";
 
 const BASE = "https://www.dola.com";
 const CHAT_URL = `${BASE}/chat/completion`;
@@ -9,7 +9,7 @@ export const doubaoWeb = {
   id: "doubao-web",
   label: "Doubao (www.dola.com)",
   credentialHint: "full Cookie header from www.dola.com",
-  howto: "1) Log in at www.dola.com (Doubao global). 2) Open DevTools → Network, refresh, click any request → copy the full `Cookie:` request header. 3) Paste the whole Cookie header here.",
+  howto: "1) Log in at www.dola.com (Doubao global).\n2) Open DevTools → Network, refresh, click any request → copy the full `Cookie:` request header.\n3) Paste the whole Cookie header here.",
   models: ["dola-speed", "dola-pro", "dola-deep-think"],
   async chat({ credential, model, messages, stream, signal }) {
     const cookie = fullCookieHeader(credential);
@@ -33,11 +33,22 @@ export const doubaoWeb = {
       Cookie: cookie,
     };
 
-    const upstream = await fetch(CHAT_URL, { method: "POST", headers, body: JSON.stringify(reqBody), signal });
-    if (!upstream.ok) {
-      const txt = await upstream.text().catch(() => "");
-      return { error: errorPayload(upstream.status, `Doubao error: ${txt.slice(0, 300)}`) };
+    let upstream;
+    try {
+      upstream = await axios({
+        method: "POST",
+        url: CHAT_URL,
+        headers,
+        data: JSON.stringify(reqBody),
+        responseType: "stream",
+        signal,
+      });
+    } catch (e) {
+      const status = e.response?.status || 502;
+      const txt = e.response?.data ? await e.response.data.text?.().catch(() => "") || "" : e.message;
+      return { error: errorPayload(status, `Doubao error: ${txt.slice(0, 300)}`) };
     }
+    const upstreamStream = nodeStreamToWeb(upstream.data);
 
     // dola SSE: data: {block_type, content, is_finish,...}; block_type 10040 = answer finish.
     const parseFrame = (obj) => {
@@ -50,7 +61,7 @@ export const doubaoWeb = {
 
     if (stream) {
       const sse = makeSseStream(model, async (emit) => {
-        for await (const obj of jsonLinesFromSse(upstream.body)) {
+        for await (const obj of jsonLinesFromSse(upstreamStream)) {
           const d = parseFrame(obj);
           if (!d) continue;
           emit.role();
@@ -62,7 +73,7 @@ export const doubaoWeb = {
     }
 
     let content = "";
-    for await (const obj of jsonLinesFromSse(upstream.body)) {
+    for await (const obj of jsonLinesFromSse(upstreamStream)) {
       const d = parseFrame(obj);
       if (!d) continue;
       content += d.content;

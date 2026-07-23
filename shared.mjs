@@ -1,8 +1,24 @@
 // Shared helpers for web-provider adapters: cookie/token extraction, OpenAI-shaped
-// SSE/JSON emission, and a tiny in-memory credential store. No external deps.
+// SSE/JSON emission, and a tiny in-memory credential store. Uses axios for HTTP.
+
+import axios from "axios";
 
 export const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+
+export { axios };
+
+/** Wrap a Node.js Readable stream (from axios responseType:'stream') as a web ReadableStream. */
+export function nodeStreamToWeb(nodeStream) {
+  return new ReadableStream({
+    start(controller) {
+      nodeStream.on("data", (chunk) => controller.enqueue(new Uint8Array(chunk)));
+      nodeStream.on("end", () => controller.close());
+      nodeStream.on("error", (err) => controller.error(err));
+    },
+    cancel() { nodeStream.destroy(); },
+  });
+}
 
 function stripPrefix(raw) {
   const t = (raw || "").trim();

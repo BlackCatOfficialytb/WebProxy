@@ -84,7 +84,7 @@ nav{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
 .hint{font-size:12px;color:var(--text-muted);margin-bottom:8px}
 .howto{font-size:12px;color:var(--text-muted);margin-bottom:8px}
 .howto summary{cursor:pointer;color:var(--brand);font-weight:500}
-.howto p{margin-top:4px;line-height:1.5}
+.howto p{margin-top:4px;line-height:1.5;white-space:pre-line}
 .models-row{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}
 .models-row code{background:var(--bg-alt);border:1px solid var(--border-subtle);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--info);font-family:ui-monospace,monospace}
 .keys-list{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}

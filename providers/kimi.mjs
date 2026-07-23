@@ -1,6 +1,6 @@
 // kimi-web — www.kimi.com Connect-RPC chat (international Kimi / Moonshot consumer).
 // Models: K2.6, K3, K3 Swarm. Conversations are deleted after each request.
-import { UA, extractKimiCredential, foldMessages, makeSseStream, jsonCompletion, errorPayload } from "../shared.mjs";
+import { axios, UA, extractKimiCredential, foldMessages, makeSseStream, jsonCompletion, errorPayload, nodeStreamToWeb } from "../shared.mjs";
 
 const BASE = "https://www.kimi.com";
 const CHAT_URL = `${BASE}/apiv2/kimi.gateway.chat.v1.ChatService/Chat`;
@@ -22,8 +22,9 @@ function resolveConfig(model) {
 async function deleteChat(chatId, authHeader, signal) {
   if (!chatId) return;
   try {
-    await fetch(`${DELETE_URL}/${chatId}`, {
+    await axios({
       method: "DELETE",
+      url: `${DELETE_URL}/${chatId}`,
       headers: {
         "User-Agent": UA,
         Origin: BASE,
@@ -39,7 +40,7 @@ export const kimiWeb = {
   id: "kimi-web",
   label: "Kimi (www.kimi.com)",
   credentialHint: "access_token (localStorage) or kimi-auth cookie",
-  howto: "1) Log in at www.kimi.com. 2a) DevTools → Application → Local Storage → https://www.kimi.com → copy `access_token`. 2b) Or DevTools → Application → Cookies → www.kimi.com → copy `kimi-auth` value. 3) Paste either value here (a `Bearer <token>` or `access_token=<v>` or `kimi-auth=<v>` string also works).",
+  howto: "1) Log in at www.kimi.com.\n2a) DevTools → Application → Local Storage → https://www.kimi.com → copy `access_token`.\n2b) Or DevTools → Application → Cookies → www.kimi.com → copy `kimi-auth` value.\n3) Paste either value here (a `Bearer <token>` or `access_token=<v>` or `kimi-auth=<v>` string also works).",
   models: Object.keys(MODEL_CONFIG),
   async chat({ credential, model, messages, stream, signal }) {
     const { mode, value } = extractKimiCredential(credential);
@@ -85,24 +86,30 @@ export const kimiWeb = {
       ? { Cookie: `kimi-auth=${value}` }
       : { Authorization: `Bearer ${value}` };
 
-    const upstream = await fetch(CHAT_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/connect+json",
-        Accept: "*/*",
-        "User-Agent": UA,
-        Origin: BASE,
-        Referer: `${BASE}/`,
-        "connect-protocol-version": "1",
-        ...authHeader,
-      },
-      body: framed,
-      signal,
-    });
-    if (!upstream.ok) {
-      const txt = await upstream.text().catch(() => "");
-      return { error: errorPayload(upstream.status, `Kimi error: ${txt.slice(0, 300)}`) };
+    let upstream;
+    try {
+      upstream = await axios({
+        method: "POST",
+        url: CHAT_URL,
+        headers: {
+          "Content-Type": "application/connect+json",
+          Accept: "*/*",
+          "User-Agent": UA,
+          Origin: BASE,
+          Referer: `${BASE}/`,
+          "connect-protocol-version": "1",
+          ...authHeader,
+        },
+        data: framed,
+        responseType: "stream",
+        signal,
+      });
+    } catch (e) {
+      const status = e.response?.status || 502;
+      const txt = e.response?.data ? await e.response.data.text?.().catch(() => "") || "" : e.message;
+      return { error: errorPayload(status, `Kimi error: ${txt.slice(0, 300)}`) };
     }
+    const upstreamStream = nodeStreamToWeb(upstream.data);
 
     const decoder = new TextDecoder();
     const parseFrame = (buf, off) => {
@@ -140,7 +147,7 @@ export const kimiWeb = {
 
     if (stream) {
       const sse = makeSseStream(model, async (emit) => {
-        const reader = upstream.body.getReader();
+        const reader = upstreamStream.getReader();
         let buf = new Uint8Array(0);
         let ended = false;
         let chatId = null;
@@ -170,7 +177,7 @@ export const kimiWeb = {
     }
 
     // non-streaming
-    const reader = upstream.body.getReader();
+    const reader = upstreamStream.getReader();
     let buf = new Uint8Array(0);
     let content = "";
     let reasoning = "";

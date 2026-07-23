@@ -1,6 +1,6 @@
 // chatglm-web — chatglm.cn (Zhipu AI mainland consumer chat).
 // Auth: `chatglm_session` cookie. Endpoint: the consumer chat API, OpenAI-shaped SSE.
-import { UA, extractCookieValue, foldMessages, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload } from "../shared.mjs";
+import { axios, UA, extractCookieValue, foldMessages, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload, nodeStreamToWeb } from "../shared.mjs";
 
 const BASE = "https://chatglm.cn";
 // Consumer web chat endpoint (OpenAI-compatible SSE). Update here if Zhipu changes it.
@@ -10,7 +10,7 @@ export const chatglmWeb = {
   id: "chatglm-web",
   label: "ChatGLM (chatglm.cn)",
   credentialHint: "chatglm_session=<...> cookie from chatglm.cn",
-  howto: "1) Log in at chatglm.cn (phone number). 2) Open DevTools → Application → Cookies → https://chatglm.cn. 3) Copy the `chatglm_session` cookie. 4) Paste `chatglm_session=<value>` (or full Cookie header) here.",
+  howto: "1) Log in at chatglm.cn (phone number).\n2) Open DevTools → Application → Cookies → https://chatglm.cn.\n3) Copy the `chatglm_session` cookie.\n4) Paste `chatglm_session=<value>` (or full Cookie header) here.",
   models: ["glm-4-plus", "glm-4-air", "glm-4-flash", "glm-4v"],
   async chat({ credential, model, messages, stream, signal }) {
     const session = extractCookieValue(credential, "chatglm_session");
@@ -31,11 +31,22 @@ export const chatglmWeb = {
       Authorization: `Bearer ${session}`,
     };
 
-    const upstream = await fetch(CHAT_URL, { method: "POST", headers, body: JSON.stringify(reqBody), signal });
-    if (!upstream.ok) {
-      const txt = await upstream.text().catch(() => "");
-      return { error: errorPayload(upstream.status, `ChatGLM error: ${txt.slice(0, 300)}`) };
+    let upstream;
+    try {
+      upstream = await axios({
+        method: "POST",
+        url: CHAT_URL,
+        headers,
+        data: JSON.stringify(reqBody),
+        responseType: "stream",
+        signal,
+      });
+    } catch (e) {
+      const status = e.response?.status || 502;
+      const txt = e.response?.data ? await e.response.data.text?.().catch(() => "") || "" : e.message;
+      return { error: errorPayload(status, `ChatGLM error: ${txt.slice(0, 300)}`) };
     }
+    const upstreamStream = nodeStreamToWeb(upstream.data);
 
     const parseFrame = (obj) => {
       const choices = obj.choices;
@@ -48,7 +59,7 @@ export const chatglmWeb = {
 
     if (stream) {
       const sse = makeSseStream(model, async (emit) => {
-        for await (const obj of jsonLinesFromSse(upstream.body)) {
+        for await (const obj of jsonLinesFromSse(upstreamStream)) {
           const d = parseFrame(obj);
           if (!d) continue;
           emit.role();
@@ -61,7 +72,7 @@ export const chatglmWeb = {
     }
 
     let content = ""; let reasoning = "";
-    for await (const obj of jsonLinesFromSse(upstream.body)) {
+    for await (const obj of jsonLinesFromSse(upstreamStream)) {
       const d = parseFrame(obj);
       if (!d) continue;
       content += d.content; reasoning += d.reasoning;

@@ -1,6 +1,6 @@
 # WebProxy — standalone web-provider gateway
 
-A dependency-free Node server that exposes an **OpenAI-compatible** `/v1` API on
+A lightweight Node server that exposes an **OpenAI-compatible** `/v1` API on
 `http://localhost:16769`, routing only to **consumer web-chat providers** (the
 sites you log into with a browser session cookie/token, used for free).
 
