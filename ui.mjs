@@ -32,7 +32,7 @@ export function renderUI(providers, host, port) {
       <details class="howto"><summary>How to copy your session</summary><p>${p.howto || p.hint}</p></details>
       <div class="models-row">${(p.models || []).map((m) => `<code>${m}</code>`).join("")}</div>
       <div class="keys-list" id="keys-${p.id}"></div>
-      <button class="btn-add" data-pid="${p.id}"><span class="material-symbols-outlined">add</span> Add Key</button>
+      <button class="btn-add" data-pid="${p.id}"><span class="material-symbols-outlined">add</span> Add Token</button>
     </div>`
     )
     .join("");
@@ -178,7 +178,7 @@ nav{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
           <div class="chat-input-row"><textarea id="chat-prompt" placeholder="Type a message… (Ctrl+Enter to send)"></textarea><button class="btn-primary" id="chat-send" style="flex:0;min-width:64px">Send</button></div>
         </div>
       </div>
-      <div class="page" id="page-endpoint">
+      <div class="page" id="page-dashboard">
         <div class="ep-card"><h3>Connection Info</h3>
           <div class="ep-row"><label>Base URL</label><code>http://${host}:${port}</code></div>
           <div class="ep-row"><label>API Key</label><code>not required (localhost only)</code></div>
@@ -196,11 +196,29 @@ nav{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
     </div>
   </div>
 </div>
-<div class="modal-overlay" id="modal-overlay">
+      <div class="page" id="page-settings">
+        <div class="ep-card"><h3>Settings</h3>  <form id="settings-change-password-form">
+    <div class="field"><label>Current Password</label><input type="password" id="settings-current-password" placeholder="Enter current password"></div>
+    <div class="field"><label>New Password</label><input type="password" id="settings-new-password" placeholder="Enter new password"></div>
+    <div class="field"><label>Confirm New Password</label><input type="password" id="settings-confirm-password" placeholder="Confirm new password"></div>
+    <div id="settings-change-password-error" class="error-message"></div>
+    <button type="submit" class="btn-primary">Change Password</button>
+  </form></div></div>
+      </div><div class="modal-overlay" id="modal-overlay">
   <div class="modal">
-    <h3 id="modal-title">Add Key</h3>
-    <div class="field"><label>Name</label><input id="modal-name" placeholder="Production Key"></div>
-    <div class="field"><label id="modal-cred-label">Cookie / Token</label><input id="modal-cred" type="password" placeholder="paste session cookie or token"></div>
+    <h3 id="modal-title">Add Token</h3>
+    <div class="field"><label>Name</label><input id="modal-name" placeholder="Production Key"><div class="modal" id="modal-change-password">
+  <h3 id="modal-change-password-title">Change Password</h3>
+  <div class="field"><label>Current Password</label><input id="modal-change-current" type="password" placeholder="Enter current password"></div>
+  <div class="field"><label>New Password</label><input id="modal-change-new" type="password" placeholder="Enter new password"></div>
+  <div class="field"><label>Confirm New Password</label><input id="modal-change-confirm" type="password" placeholder="Confirm new password"></div>
+  <div id="modal-change-password-error" class="error-message"></div>
+  <div class="modal-actions">
+    <button class="btn-ghost" id="modal-change-cancel">Cancel</button>
+    <button class="btn-primary" id="modal-change-save">Save</button>
+  </div>
+</div></div>
+    <div class="field"><label id="modal-cred-label">Token</label><input id="modal-cred" type="password" placeholder="paste token"></div>
     <div class="field"><label>Priority (lower = tried first)</label><input id="modal-priority" type="number" value="1" min="1"></div>
     <div id="modal-validate-result"></div>
     <div class="modal-actions">
@@ -221,7 +239,7 @@ function showPage(id){
   document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));
   const pg=$("page-"+id); if(pg) pg.classList.add("active");
   const nav=document.querySelector('.nav-item[data-page="'+id+'"]'); if(nav) nav.classList.add("active");
-  const titles={providers:"Providers",chat:"Basic Chat",endpoint:"Endpoint & Key"};
+  const titles={dashboard:"Dashboard",providers:"Providers",chat:"Basic Chat",settings:"Settings"};
   $("page-title").textContent=titles[id]||id;
 }
 
@@ -335,6 +353,137 @@ $("sidebar-toggle").addEventListener("click",()=>{sidebarEl.classList.toggle("op
 overlayEl.addEventListener("click",()=>{sidebarEl.classList.remove("open");overlayEl.classList.remove("open");});
 fetch(API+"/api/health").then(r=>r.json()).then(d=>$("health").textContent=d.ok?"online":"offline").catch(()=>$("health").textContent="offline");
 refresh();
-</script>
+// Fetch auth status on load to see if we need to show change password modal
+async function checkPasswordStatus() {
+  try {
+    const response = await fetch('/api/auth/status');
+    const data = await response.json();
+    if (data.authenticated && data.isDefaultPassword) {
+      showChangePasswordModal();
+    }
+  } catch (err) {
+    console.error('Failed to check password status:', err);
+  }
+}
+
+function showChangePasswordModal() {
+  const modal = document.getElementById('modal-change-password');
+  const overlay = document.getElementById('modal-overlay');
+  modal.classList.add('open'); // We don't have a class for open? We'll use the same as the other modal: we'll add a class 'open' to the modal and set the overlay to open.
+  overlay.classList.add('open');
+}
+
+function hideChangePasswordModal() {
+  const modal = document.getElementById('modal-change-password');
+  const overlay = document.getElementById('modal-overlay');
+  modal.classList.remove('open');
+  overlay.classList.remove('open');
+}
+
+// Handle change password modal form
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('modal-change-password'); // Actually, the modal is not a form, we need to get the form inside.
+  // We'll add an event listener to the save button.
+  const saveBtn = document.getElementById('modal-change-save');
+  const cancelBtn = document.getElementById('modal-change-cancel');
+  const errorDiv = document.getElementById('modal-change-password-error');
+  const currentInput = document.getElementById('modal-change-current');
+  const newInput = document.getElementById('modal-change-new');
+  const confirmInput = document.getElementById('modal-change-confirm');
+
+  saveBtn.addEventListener('click', async () => {
+    errorDiv.textContent = '';
+    const currentPassword = currentInput.value;
+    const newPassword = newInput.value;
+    const confirmPassword = confirmInput.value;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      errorDiv.textContent = 'All fields are required';
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      errorDiv.textContent = 'New passwords do not match';
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/password', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to change password');
+      }
+      // Success
+      hideChangePasswordModal();
+      // Optionally, show a success message or redirect to settings?
+      alert('Password changed successfully. Please log in again if needed.');
+      // We'll reload the page to clear the modal and reset the state? Or we can just hide the modal and let the user continue.
+      // Since we changed the password, the existing session is still valid? We'll let the user continue.
+    } catch (err) {
+      errorDiv.textContent = err.message;
+    }
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    hideChangePasswordModal();
+    // Clear the form
+    currentInput.value = '';
+    newInput.value = '';
+    confirmInput.value = '';
+    errorDiv.textContent = '';
+  });
+});
+
+// Also, we want to run the checkPasswordStatus when the app loads
+checkPasswordStatus();// Handle settings change password form
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('settings-change-password-form');
+  const errorDiv = document.getElementById('settings-change-password-error');
+  const currentInput = document.getElementById('settings-current-password');
+  const newInput = document.getElementById('settings-new-password');
+  const confirmInput = document.getElementById('settings-confirm-password');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorDiv.textContent = '';
+    const currentPassword = currentInput.value;
+    const newPassword = newInput.value;
+    const confirmPassword = confirmInput.value;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      errorDiv.textContent = 'All fields are required';
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      errorDiv.textContent = 'New passwords do not match';
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/password', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to change password');
+      }
+      // Success
+      alert('Password changed successfully. Please log in again if needed.');
+      // Reset the form
+      form.reset();
+      errorDiv.textContent = '';
+    } catch (err) {
+      errorDiv.textContent = err.message;
+    }
+  });
+});</script>
 </body></html>`;
 }
+
+
+

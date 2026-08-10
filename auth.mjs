@@ -1,14 +1,23 @@
 import crypto from "node:crypto";
-import bcrypt from "bcrypt";
 import { getSetting, setSetting } from "./db.mjs";
 
-const SALT_ROUNDS = 12;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Fixed: previously referenced but never defined.
 const passwordSessionStore = new Map();
 
 let passwordHash = null;
+
+// Function to compute SHA-256 hash of a password
+export function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+// Function to verify a password against a hash
+export async function verifyPassword(password, hash) {
+  const computedHash = hashPassword(password);
+  return computedHash === hash;
+}
 
 export async function initializePasswordAuth() {
   const storedHash = getSetting("password_hash");
@@ -18,24 +27,16 @@ export async function initializePasswordAuth() {
   }
   const envPassword = process.env.WEBPROXY_PASSWORD;
   if (envPassword) {
-    passwordHash = await hashPassword(envPassword);
+    passwordHash = hashPassword(envPassword);
     setSetting("password_hash", passwordHash);
     console.log("[auth] Initial admin password set from WEBPROXY_PASSWORD");
   } else {
-    console.log("[auth] No admin password set - use settings page to set one");
+    // Set to default password "123456"
+    const defaultPassword = "123456";
+    passwordHash = hashPassword(defaultPassword);
+    setSetting("password_hash", passwordHash);
+    console.log("[auth] No admin password set - set default password");
   }
-}
-
-export function getSalt() {
-  return bcrypt.genSaltSync(SALT_ROUNDS);
-}
-
-export function hashPassword(password) {
-  return bcrypt.hash(password, SALT_ROUNDS);
-}
-
-export async function verifyPassword(password, hash) {
-  return bcrypt.compare(password, hash);
 }
 
 export function hasAdminPassword() {
@@ -97,4 +98,4 @@ export async function requireAuth(req) {
   return Boolean(await resolveToken(req));
 }
 
-export default { initializePasswordAuth, isAuthenticated, createAuthToken, invalidateSession, requireAuth, hasAdminPassword };
+export default { initializePasswordAuth, isAuthenticated, createAuthToken, invalidateSession, requireAuth, hasAdminPassword, hashPassword };
