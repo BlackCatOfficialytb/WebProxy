@@ -1,14 +1,27 @@
 // WebProxy server — OpenAI-compatible /v1 gateway for web-chat providers.
 // Listens on localhost (default :16769). Requires axios.
-// Store SQLite imports at top for server.ts base
+import http from "node:http";
+import crypto from "node:crypto";
 import db from "./db.mjs";
-import { hashPassword, verifyPassword, getSalt } from "./auth.mjs";
+import { PROVIDERS, BY_ID } from "./providers/index.mjs";
+import { renderUI } from "./ui.mjs";
+import { initializePasswordAuth, requireAuth, createAuthToken, invalidateSession, hasAdminPassword } from "./auth.mjs";
 
 const PORT = Number(process.env.PORT) || 16769;
 const HOST = process.env.HOST || "127.0.0.1";
 
-function sendJson(res, status, obj) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+// SECURITY: fail loudly if someone tries to bind to a public interface
+// without an admin password — the /api/connections + /v1/chat endpoints
+// would otherwise be exposed to the network.
+if (HOST !== "127.0.0.1" && HOST !== "::1" && HOST !== "localhost") {
+  console.warn("[security] Binding to non-loopback interface. Ensure WEBPROXY_PASSWORD is set and you know what you are doing.");
+}
+
+// In-memory credential registry (matches original design).
+const credentials = new Map(PROVIDERS.map((p) => [p.id, []]));
+
+function sendJson(res, status, obj, extraHeaders = {}) {
+  res.writeHead(status, { "Content-Type": "application/json", ...extraHeaders });
   res.end(JSON.stringify(obj));
 }
 
@@ -23,10 +36,26 @@ function readBody(req, maxBytes = 1024 * 1024) {
     });
     req.on("end", () => {
       if (!data) return resolve({});
-      try { resolve(JSON.parse(data)); } catch { reject(new Error("invalid JSON body")); }
+      try {
+        const parsed = JSON.parse(data);
+        // SECURITY: strip prototype-pollution keys recursively.
+        resolve(sanitizePayload(parsed));
+      } catch { reject(new Error("invalid JSON body")); }
     });
     req.on("error", reject);
   });
+}
+
+// Recursive sanitizer — removes __proto__, constructor, prototype keys.
+function sanitizePayload(v, depth = 0) {
+  if (depth > 8 || v === null || typeof v !== "object") return v;
+  if (Array.isArray(v)) return v.map((x) => sanitizePayload(x, depth + 1));
+  const out = {};
+  for (const [k, val] of Object.entries(v)) {
+    if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
+    out[k] = sanitizePayload(val, depth + 1);
+  }
+  return out;
 }
 
 function buildModelsList() {
@@ -50,6 +79,14 @@ async function handleChat(req, res) {
     return sendJson(res, 400, {
       error: { message: `Unknown or missing provider. Use one of: ${PROVIDERS.map((p) => p.id).join(", ")}`, type: "invalid_provider" },
     });
+  }
+
+  // SECURITY FIX: `body.credential` previously let any unauthenticated caller
+  // turn the server into an open proxy (credential field used as arbitrary
+  // upstream). Only authenticated admins may supply per-request credentials.
+  const authed = await requireAuth(req);
+  if (body.credential && !authed) {
+    return sendJson(res, 401, { error: { message: "Supplying body.credential requires authentication. Configure credentials via /api/connections instead." } });
   }
 
   const stored = orderedCreds(provider.id);
@@ -125,7 +162,11 @@ function listConnections() {
   });
 }
 
-function handleConnections(req, res) {
+async function handleConnections(req, res) {
+  // SECURITY FIX: list/add/delete/test now all require admin auth.
+  const authed = await requireAuth(req);
+  if (!authed) return sendJson(res, 401, { error: { message: "Authentication required. Set WEBPROXY_PASSWORD and send it as a Bearer token." } });
+
   if (req.method === "GET") return sendJson(res, 200, { connections: listConnections() });
   return readBody(req)
     .then((b) => {
@@ -145,7 +186,10 @@ function handleConnections(req, res) {
     .catch((e) => sendJson(res, 400, { error: { message: e.message } }));
 }
 
-function handleDeleteCredential(req, res, id, index) {
+async function handleDeleteCredential(req, res, id, index) {
+  const authed = await requireAuth(req);
+  if (!authed) return sendJson(res, 401, { error: { message: "Authentication required." } });
+
   const p = BY_ID[id];
   if (!p) return sendJson(res, 400, { error: { message: `Unknown provider: ${id}` } });
   const list = credentials.get(p.id) || [];
@@ -157,6 +201,9 @@ function handleDeleteCredential(req, res, id, index) {
 
 // Mark a key's status after a validate (lightweight chat probe).
 async function handleTestCredential(req, res, id, index) {
+  const authed = await requireAuth(req);
+  if (!authed) return sendJson(res, 401, { error: { message: "Authentication required." } });
+
   const p = BY_ID[id];
   if (!p) return sendJson(res, 400, { error: { message: `Unknown provider: ${id}` } });
   const list = credentials.get(p.id) || [];
@@ -194,6 +241,10 @@ function endpointInfo() {
     models: PROVIDERS.flatMap((p) => p.models.map((m) => `${p.id}/${m}`)),
     providers: PROVIDERS.map((p) => ({ id: p.id, label: p.label })),
     chat: `POST http://${HOST}:${PORT}/v1/chat/completions  (body must include "provider" + "model")`,
+    // SECURITY: endpoints that require auth.
+    auth: hasAdminPassword()
+      ? "Admin password set — send `Authorization: Bearer <WEBPROXY_PASSWORD>` to modify credentials."
+      : "No admin password set (WEBPROXY_PASSWORD) — credential APIs are locked until one is set.",
   };
 }
 
@@ -241,8 +292,10 @@ const server = http.createServer(async (req, res) => {
   return sendJson(res, 404, { error: { message: `Not found: ${path}` } });
 });
 
-server.listen(PORT, HOST, () => {
+server.listen(PORT, HOST, async () => {
+  await initializePasswordAuth();
   console.log(`WebProxy listening on http://${HOST}:${PORT}`);
   console.log(`Providers: ${PROVIDERS.map((p) => p.id).join(", ")}`);
+  console.log(`Auth: ${hasAdminPassword() ? "admin password set" : "NO ADMIN PASSWORD — credential APIs locked until WEBPROXY_PASSWORD is set"}`);
   console.log(`UI: http://${HOST}:${PORT}/`);
 });
