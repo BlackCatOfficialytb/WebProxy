@@ -12,6 +12,6 @@
     "animejs": "^4.5.0",
     "axios": "^1.7.9",
     "bcrypt": "^6.0.0",
-    "better-sqlite3": "^13.0.1"
+    "better-sqlite3": "^13.0.3"
   }
 }
