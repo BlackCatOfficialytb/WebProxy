@@ -125,7 +125,9 @@ async function handleChat(req, res) {
         const errStatus = result.error.status || 500;
         if (errStatus !== 401 && errStatus !== 403 && errStatus !== 429) {
           req.removeListener("close", onClose);
-          return sendJson(res, errStatus, { error: { message: result.error.message || "upstream error" } });
+          // Log full error server-side, send sanitized message to client
+          console.error(`[upstream error] ${provider.id}:`, result.error.message || "unknown");
+          return sendJson(res, errStatus, { error: { message: errStatus === 502 ? "Upstream provider error" : "Upstream error" } });
         }
         continue;
       }
@@ -153,7 +155,8 @@ async function handleChat(req, res) {
       }
       return sendJson(res, 200, result.json);
     } catch (e) {
-      lastError = { status: 502, message: e.message };
+      console.error(`[upstream error] ${provider.id}:`, e.message);
+      lastError = { status: 502, message: "Upstream provider error" };
       req.removeListener("close", onClose);
     }
   }
