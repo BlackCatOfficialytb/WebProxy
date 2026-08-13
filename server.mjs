@@ -429,6 +429,9 @@ const server = http.createServer(async (req, res) => {
       if (!isValid) { loginFailed(ip); return sendJson(res, 401, { error: { message: "Invalid password" } }); }
     }
     loginAttempts.delete(ip);
+    // Invalidate any pre-existing session for this request (session fixation defense)
+    const oldToken = await isAuthenticated(req);
+    if (oldToken) invalidateSession(oldToken);
     const sid = createAuthToken();
     const secure = !(HOST === "127.0.0.1" || HOST === "::1" || HOST === "localhost");
     res.setHeader("Set-Cookie", `webproxy_session=${sid}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure ? "; Secure" : ""}`);
