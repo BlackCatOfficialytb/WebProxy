@@ -2,6 +2,7 @@
 // SSE/JSON emission, and a tiny in-memory credential store. Uses axios for HTTP.
 
 import axios from "axios";
+import crypto from "node:crypto";
 
 export const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
@@ -84,7 +85,7 @@ export function extractBearer(raw) {
 // ── OpenAI-shaped streaming helpers ──────────────────────────────────────────
 
 export function newChunkId() {
-  return `chatcmpl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `chatcmpl-${Date.now()}-${crypto.randomUUID().split("-")[0]}`;
 }
 
 /** Build a ReadableStream that emits OpenAI chunk deltas, then [DONE]. */
