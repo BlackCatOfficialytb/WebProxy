@@ -393,8 +393,26 @@ const server = http.createServer(async (req, res) => {
       if (m) return handleTestCredential(req, res, decodeURIComponent(m[1]), Number(m[2]));
     }
     return handleConnections(req, res);
-// Auth status endpoint
-if (req.method === "GET" && path === "/api/auth/status") {
+  }
+
+  // Login endpoint — verifies password and sets an HttpOnly session cookie.
+  if (req.method === "POST" && path === "/api/auth/login") {
+    const authed = await requireAuth(req);
+    if (!authed) {
+      let loginBody;
+      try { loginBody = await readBody(req); } catch (e) { return sendJson(res, 400, { error: { message: e.message } }); }
+      const password = String(loginBody.password || "");
+      const isValid = await verifyPassword(password, await getPasswordHash());
+      if (!isValid) return sendJson(res, 401, { error: { message: "Invalid password" } });
+    }
+    const sid = createAuthToken();
+    const secure = !(HOST === "127.0.0.1" || HOST === "::1" || HOST === "localhost");
+    res.setHeader("Set-Cookie", `webproxy_session=${sid}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure ? "; Secure" : ""}`);
+    return sendJson(res, 200, { ok: true, authenticated: true });
+  }
+
+  // Auth status endpoint
+  if (req.method === "GET" && path === "/api/auth/status") {
   const authed = await requireAuth(req);
   if (!authed) {
     return sendJson(res, 401, { error: { message: "Unauthorized" } });
@@ -406,29 +424,28 @@ if (req.method === "GET" && path === "/api/auth/status") {
   });
 }
 
-// Change password endpoint
-if (req.method === "PATCH" && path === "/api/auth/password") {
-  const authed = await requireAuth(req);
-  if (!authed) {
-    return sendJson(res, 401, { error: { message: "Unauthorized" } });
-  }
-  try {
-    const body = await readBody(req);
-    const { currentPassword, newPassword } = body;
-    if (!currentPassword || !newPassword) {
-      return sendJson(res, 400, { error: { message: "Current password and new password are required" } });
+  // Change password endpoint
+  if (req.method === "PATCH" && path === "/api/auth/password") {
+    const authed = await requireAuth(req);
+    if (!authed) {
+      return sendJson(res, 401, { error: { message: "Unauthorized" } });
     }
-    const isValid = await verifyPassword(currentPassword, await getPasswordHash());
-    if (!isValid) {
-      return sendJson(res, 401, { error: { message: "Invalid current password" } });
+    try {
+      const body = await readBody(req);
+      const { currentPassword, newPassword } = body;
+      if (!currentPassword || !newPassword) {
+        return sendJson(res, 400, { error: { message: "Current password and new password are required" } });
+      }
+      const isValid = await verifyPassword(currentPassword, await getPasswordHash());
+      if (!isValid) {
+        return sendJson(res, 401, { error: { message: "Invalid current password" } });
+      }
+      const newHash = await hashPassword(newPassword);
+      await setSetting("password_hash", newHash);
+      return sendJson(res, 200, { ok: true });
+    } catch (err) {
+      return sendJson(res, 500, { error: { message: err.message } });
     }
-    const newHash = await hashPassword(newPassword);
-    await setSetting("password_hash", newHash);
-    return sendJson(res, 200, { ok: true });
-  } catch (err) {
-    return sendJson(res, 500, { error: { message: err.message } });
-  }
-}    return handleConnections(req, res);
   }
   if (req.method === "GET" && (path === "/" || path === "/index.html")) {
     res.writeHead(200, { "Content-Type": "text/html" });
