@@ -97,9 +97,18 @@ async function handleChat(req, res) {
     return sendJson(res, 400, { error: { message: `No credential configured for ${provider.id}. Add one in the UI or body.credential.` } });
   }
 
-  const model = body.model || provider.models[0];
+  const model = String(body.model || provider.models[0]);
+  // Reject models not advertised by the provider — prevents probing/arbitrary routing
+  if (!provider.models.includes(model)) {
+    return sendJson(res, 400, {
+      error: { message: `Unknown model "${model}". Valid: ${provider.models.join(", ")}`, type: "invalid_model" },
+    });
+  }
   const stream = body.stream !== false;
-  const messages = body.messages || [];
+  if (!Array.isArray(body.messages)) {
+    return sendJson(res, 400, { error: { message: "messages must be an array" } });
+  }
+  const messages = body.messages;
 
   let lastError = null;
   for (const entry of creds) {
