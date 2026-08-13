@@ -123,7 +123,14 @@ async function handleChat(req, res) {
       req.removeListener("close", onClose);
       if (result.stream) {
         const upstreamResp = result.stream;
-        res.writeHead(upstreamResp.status || 200, Object.fromEntries(upstreamResp.headers));
+        // Only forward safe headers — never pass upstream set-cookie, server,
+        // hop-by-hop, or caching headers through to the client.
+        const headers = {};
+        for (const [k, v] of Object.entries(upstreamResp.headers)) {
+          const lk = k.toLowerCase();
+          if (lk === "content-type" || lk === "cache-control") headers[k] = v;
+        }
+        res.writeHead(upstreamResp.status || 200, headers);
         const reader = upstreamResp.body.getReader();
         try {
           while (true) {
