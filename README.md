@@ -91,7 +91,7 @@ curl -sS http://localhost:16769/v1/chat/completions \
 
 ## Notes
 
-- Credentials are kept **in memory only** (lost on restart). Never expose the port.
+- Credentials are persisted to `data/webproxy.json` (survive restarts). Never expose the port.
 - This is a reverse proxy to third-party web UIs; respect each site's ToS.
 - Kimi conversations are automatically deleted after each request.
 - `chatglm-web` uses the chatglm.cn consumer endpoint; if Zhipu changes it, update

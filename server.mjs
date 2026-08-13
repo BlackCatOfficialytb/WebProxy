@@ -18,8 +18,7 @@ if (HOST !== "127.0.0.1" && HOST !== "::1" && HOST !== "localhost") {
   console.warn("[security] Binding to non-loopback interface. Ensure WEBPROXY_PASSWORD is set and you know what you are doing.");
 }
 
-// In-memory credential registry (matches original design).
-const credentials = new Map(PROVIDERS.map((p) => [p.id, []]));
+// Credentials are persisted to disk via db.mjs (survive restarts).
 
 function sendJson(res, status, obj, extraHeaders = {}) {
   res.writeHead(status, { "Content-Type": "application/json", ...extraHeaders });
@@ -67,7 +66,7 @@ function buildModelsList() {
 
 // Credentials sorted by priority ascending (failover order).
 function orderedCreds(providerId) {
-  return (credentials.get(providerId) || []).slice().sort((a, b) => a.priority - b.priority);
+  return db.getCredentials(providerId);
 }
 
 async function handleChat(req, res) {
@@ -182,15 +181,15 @@ function safeDecode(s) {
 
 function listConnections() {
   return PROVIDERS.map((p) => {
-    const list = credentials.get(p.id) || [];
+    const rows = db.getCredentials(p.id);
     return {
       provider: p.id,
       label: p.label,
       hint: p.credentialHint,
       howto: p.howto || p.credentialHint,
       models: p.models,
-      keys: list.map((k, i) => ({ index: i, name: k.name, priority: k.priority, status: k.status, masked: maskCred(k.cred) })),
-      credentials: list.length,
+      keys: rows.map((k, i) => ({ index: i, name: k.name, priority: k.priority, status: k.status, masked: maskCred(k.cred) })),
+      credentials: rows.length,
     };
   });
 }
@@ -206,15 +205,14 @@ async function handleConnections(req, res) {
       const p = BY_ID[b.provider];
       if (!p) return sendJson(res, 400, { error: { message: `Unknown provider: ${b.provider}` } });
       if (!b.credential) return sendJson(res, 400, { error: { message: "credential is required" } });
-      const list = credentials.get(p.id) || [];
-      list.push({
-        name: String(b.name || `Key ${list.length + 1}`).slice(0, 40),
-        cred: String(b.credential),
-        priority: Number.isFinite(b.priority) ? Number(b.priority) : list.length + 1,
-        status: "unknown",
-      });
-      credentials.set(p.id, list);
-      return sendJson(res, 200, { ok: true, provider: p.id, count: list.length });
+      const count = db.getCredentials(p.id).length;
+      db.addCredential(
+        p.id,
+        String(b.name || `Key ${count + 1}`).slice(0, 40),
+        String(b.credential),
+        Number.isFinite(b.priority) ? Number(b.priority) : count + 1
+      );
+      return sendJson(res, 200, { ok: true, provider: p.id, count: db.getCredentials(p.id).length });
     })
     .catch((e) => sendJson(res, 400, { error: { message: e.message } }));
 }
@@ -225,11 +223,10 @@ async function handleDeleteCredential(req, res, id, index) {
 
   const p = BY_ID[id];
   if (!p) return sendJson(res, 400, { error: { message: `Unknown provider: ${id}` } });
-  const list = credentials.get(p.id) || [];
+  const list = db.getCredentials(p.id);
   if (index < 0 || index >= list.length) return sendJson(res, 404, { error: { message: "credential not found" } });
-  list.splice(index, 1);
-  credentials.set(p.id, list);
-  return sendJson(res, 200, { ok: true, provider: p.id, count: list.length });
+  db.deleteCredential(list[index].id);
+  return sendJson(res, 200, { ok: true, provider: p.id, count: db.getCredentials(p.id).length });
 }
 
 // Mark a key's status after a validate (lightweight chat probe).
@@ -239,7 +236,7 @@ async function handleTestCredential(req, res, id, index) {
 
   const p = BY_ID[id];
   if (!p) return sendJson(res, 400, { error: { message: `Unknown provider: ${id}` } });
-  const list = credentials.get(p.id) || [];
+  const list = db.getCredentials(p.id);
   if (index < 0 || index >= list.length) return sendJson(res, 404, { error: { message: "credential not found" } });
   const entry = list[index];
   try {
@@ -255,15 +252,16 @@ async function handleTestCredential(req, res, id, index) {
       });
       clearTimeout(t);
       if (result.error) {
-        entry.status = "failed";
-        return sendJson(res, result.error.status || 500, { valid: false, message: result.error.message || "credential rejected" });
+        db.updateCredentialStatus(entry.id, "failed");
+        return sendJson(res, result.error.status || 500, { valid: false, message: "Credential rejected by upstream provider" });
       }
-      entry.status = "active";
+      db.updateCredentialStatus(entry.id, "active");
       return sendJson(res, 200, { valid: true });
     } finally { clearTimeout(t); }
   } catch (e) {
-    entry.status = "failed";
-    return sendJson(res, 502, { valid: false, message: e.message });
+    db.updateCredentialStatus(entry.id, "failed");
+    console.error(`[credential test error] ${p.id}:`, e.message);
+    return sendJson(res, 502, { valid: false, message: "Credential test failed" });
   }
 }
 
@@ -449,8 +447,9 @@ const server = http.createServer(async (req, res) => {
     return handleChat(req, res);
   }
   if (path === "/api/connections" || /^\/api\/connections\/[^/]+\/\d+/.test(path)) {
-    if (!csrfSafe(req)) {
-      return sendJson(res, 403, { error: { message: "CSRF check failed — missing or mismatched Origin/Referer" } });
+    // CSRF check only on state-changing methods (GET is read-only)
+    if (["POST", "DELETE", "PATCH"].includes(req.method) && !csrfSafe(req)) {
+      return sendJson(res, 403, { error: { message: "CSRF check failed - missing or mismatched Origin/Referer" } });
     }
     if (req.method === "DELETE") {
       const m = path.match(/^\/api\/connections\/([^/]+)\/(\d+)$/);
