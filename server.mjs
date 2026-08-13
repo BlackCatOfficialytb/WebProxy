@@ -5,7 +5,8 @@ import crypto from "node:crypto";
 import db from "./db.mjs";
 import { PROVIDERS, BY_ID } from "./providers/index.mjs";
 import { renderUI } from "./ui.mjs";
-import { initializePasswordAuth, requireAuth, createAuthToken, invalidateSession, hasAdminPassword, hashPassword } from "./auth.mjs";
+import { initializePasswordAuth, requireAuth, createAuthToken, invalidateSession, hasAdminPassword, hashPassword, verifyPassword, getPasswordHash } from "./auth.mjs";
+import { setSetting } from "./db.mjs";
 
 const PORT = Number(process.env.PORT) || 16769;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -398,8 +399,7 @@ if (req.method === "GET" && path === "/api/auth/status") {
   if (!authed) {
     return sendJson(res, 401, { error: { message: "Unauthorized" } });
   }
-  const defaultPasswordHash = hashPassword("123456");
-  const isDefaultPassword = passwordHash === defaultPasswordHash;
+  const isDefaultPassword = await verifyPassword("123456", await getPasswordHash());
   return sendJson(res, 200, {
     authenticated: true,
     isDefaultPassword: isDefaultPassword
@@ -418,12 +418,11 @@ if (req.method === "PATCH" && path === "/api/auth/password") {
     if (!currentPassword || !newPassword) {
       return sendJson(res, 400, { error: { message: "Current password and new password are required" } });
     }
-    const isValid = await verifyPassword(currentPassword, passwordHash);
+    const isValid = await verifyPassword(currentPassword, await getPasswordHash());
     if (!isValid) {
       return sendJson(res, 401, { error: { message: "Invalid current password" } });
     }
-    const newHash = hashPassword(newPassword);
-    passwordHash = newHash;
+    const newHash = await hashPassword(newPassword);
     await setSetting("password_hash", newHash);
     return sendJson(res, 200, { ok: true });
   } catch (err) {

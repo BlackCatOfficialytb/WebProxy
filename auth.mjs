@@ -43,6 +43,10 @@ export function hasAdminPassword() {
   return Boolean(passwordHash);
 }
 
+export function getPasswordHash() {
+  return passwordHash;
+}
+
 function pruneExpired() {
   const now = Date.now();
   for (const [id, s] of passwordSessionStore) {
@@ -98,4 +102,4 @@ export async function requireAuth(req) {
   return Boolean(await resolveToken(req));
 }
 
-export default { initializePasswordAuth, isAuthenticated, createAuthToken, invalidateSession, requireAuth, hasAdminPassword, hashPassword };
+export default { initializePasswordAuth, isAuthenticated, createAuthToken, invalidateSession, requireAuth, hasAdminPassword, getPasswordHash, verifyPassword, hashPassword };
