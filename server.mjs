@@ -107,7 +107,10 @@ async function handleChat(req, res) {
     const onClose = () => ac.abort();
     req.on("close", onClose);
     try {
+      // 30-second timeout so a hung upstream can't tie up a worker forever
+      const to = setTimeout(() => ac.abort(), 30000);
       const result = await provider.chat({ credential: entry.cred, model, messages, stream, signal: ac.signal });
+      clearTimeout(to);
       if (result.error) {
         lastError = result.error;
         const errStatus = result.error.status || 500;
