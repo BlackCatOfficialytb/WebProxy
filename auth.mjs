@@ -1,22 +1,31 @@
 import crypto from "node:crypto";
+import bcrypt from "bcrypt";
 import { getSetting, setSetting } from "./db.mjs";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const BCRYPT_ROUNDS = 12;
 
 // Fixed: previously referenced but never defined.
 const passwordSessionStore = new Map();
 
 let passwordHash = null;
 
-// Function to compute SHA-256 hash of a password
-export function hashPassword(password) {
-  return crypto.createHash('sha256').update(password).digest('hex');
+// Function to hash a password using bcrypt with a random salt
+export async function hashPassword(password) {
+  const salt = await bcrypt.genSalt(BCRYPT_ROUNDS);
+  return await bcrypt.hash(password, salt);
 }
 
-// Function to verify a password against a hash
+// Function to verify a password against a bcrypt hash (or legacy SHA-256)
 export async function verifyPassword(password, hash) {
-  const computedHash = hashPassword(password);
-  return computedHash === hash;
+  if (!hash) return false;
+  // bcrypt hashes start with $2 (e.g. $2a$, $2b$)
+  if (hash.startsWith("$2")) {
+    return await bcrypt.compare(password, hash);
+  }
+  // Legacy SHA-256 hashes (64 hex chars) — still verified, migrated on next change
+  const legacyHash = crypto.createHash('sha256').update(password).digest('hex');
+  return legacyHash === hash;
 }
 
 export async function initializePasswordAuth() {
@@ -27,14 +36,14 @@ export async function initializePasswordAuth() {
   }
   const envPassword = process.env.WEBPROXY_PASSWORD;
   if (envPassword) {
-    passwordHash = hashPassword(envPassword);
-    setSetting("password_hash", passwordHash);
+    passwordHash = await hashPassword(envPassword);
+    await setSetting("password_hash", passwordHash);
     console.log("[auth] Initial admin password set from WEBPROXY_PASSWORD");
   } else {
     // Set to default password "123456"
     const defaultPassword = "123456";
-    passwordHash = hashPassword(defaultPassword);
-    setSetting("password_hash", passwordHash);
+    passwordHash = await hashPassword(defaultPassword);
+    await setSetting("password_hash", passwordHash);
     console.log("[auth] No admin password set - set default password");
   }
 }

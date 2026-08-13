@@ -413,16 +413,16 @@ const server = http.createServer(async (req, res) => {
 
   // Auth status endpoint
   if (req.method === "GET" && path === "/api/auth/status") {
-  const authed = await requireAuth(req);
-  if (!authed) {
-    return sendJson(res, 401, { error: { message: "Unauthorized" } });
+    const authed = await requireAuth(req);
+    if (!authed) {
+      return sendJson(res, 401, { error: { message: "Unauthorized" } });
+    }
+    const isDefaultPassword = await verifyPassword("123456", await getPasswordHash());
+    return sendJson(res, 200, {
+      authenticated: true,
+      isDefaultPassword: isDefaultPassword
+    });
   }
-  const isDefaultPassword = await verifyPassword("123456", await getPasswordHash());
-  return sendJson(res, 200, {
-    authenticated: true,
-    isDefaultPassword: isDefaultPassword
-  });
-}
 
   // Change password endpoint
   if (req.method === "PATCH" && path === "/api/auth/password") {
