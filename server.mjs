@@ -397,7 +397,7 @@ const SEC_HEADERS = {
   "X-Frame-Options": "DENY",
   "X-XSS-Protection": "1; mode=block",
   "Referrer-Policy": "no-referrer",
-  "Content-Security-Policy": "default-src 'self'; style-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; connect-src 'self'",
+  "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; connect-src 'self'",
 };
 
 // CSRF check — for cookie-authenticated state-changing requests only.
