@@ -254,7 +254,7 @@ function uiHtml() {
 
 
 function renderLoginUi() {
-  return <!doctype html>
+  return `<!doctype html>
 <html lang="en" class="dark">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -359,7 +359,7 @@ form.addEventListener('submit', async (e) => {
 // Auto-focus password input
 passwordInput.focus();
 </script>
-</body></html>;
+</body></html>`;
 }
 const SEC_HEADERS = {
   "X-Content-Type-Options": "nosniff",
@@ -409,7 +409,7 @@ if (req.method === "GET" && path === "/api/auth/status") {
 // Change password endpoint
 if (req.method === "PATCH" && path === "/api/auth/password") {
   const authed = await requireAuth(req);
-  if (!auted) {
+  if (!authed) {
     return sendJson(res, 401, { error: { message: "Unauthorized" } });
   }
   try {
