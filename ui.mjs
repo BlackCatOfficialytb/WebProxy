@@ -102,6 +102,8 @@ nav{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
 /* ── Modal ── */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:50;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
+#modal-change-password{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:60;align-items:center;justify-content:center}
+#modal-change-password.open{display:flex}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:min(92vw,440px);box-shadow:var(--shadow-elev)}
 .modal h3{font-size:16px;font-weight:600;margin-bottom:16px}
 .field{margin-bottom:12px}
@@ -134,6 +136,7 @@ nav{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
 .ep-row label{font-size:12px;color:var(--text-muted);min-width:80px}
 .ep-row code{font-size:13px;color:var(--info);background:var(--bg-alt);padding:2px 8px;border-radius:4px;font-family:ui-monospace,monospace}
 .providers-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.empty-state{display:none}.empty-state.visible{display:flex}
 .material-symbols-outlined{font-family:'Material Symbols Outlined';font-weight:normal;font-style:normal;font-size:24px;line-height:1;letter-spacing:normal;text-transform:none;display:inline-block;white-space:nowrap;word-wrap:normal;direction:ltr;font-feature-settings:'liga';-webkit-font-feature-settings:'liga';-webkit-font-smoothing:antialiased;font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24}
 .sidebar-toggle{display:none;background:transparent;border:0;color:var(--text);cursor:pointer;padding:4px;border-radius:6px}
 .sidebar-toggle:hover{background:var(--surface-2)}
@@ -193,6 +196,12 @@ nav{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
        "messages":[{"role":"user","content":"hello"}]}'</pre>
         </div>
       </div>
+      <div class="empty-state" id="dashboard-empty">
+        <span class="material-symbols-outlined" style="font-size:48px;color:var(--text-muted);opacity:0.3">endpoint</span>
+        <p style="font-size:16px;font-weight:500">No Endpoints Configured</p>
+        <p style="font-size:13px;color:var(--text-subtle)">Add a provider key in the Providers section to get started.</p>
+        <button class="btn-primary" onclick="showPage('providers')" style="max-width:200px;margin-top:8px">Create Endpoint</button>
+      </div>
     </div>
   </div>
 </div>
@@ -204,10 +213,7 @@ nav{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
     <div id="settings-change-password-error" class="error-message"></div>
     <button type="submit" class="btn-primary">Change Password</button>
   </form></div></div>
-      </div><div class="modal-overlay" id="modal-overlay">
-  <div class="modal">
-    <h3 id="modal-title">Add Token</h3>
-    <div class="field"><label>Name</label><input id="modal-name" placeholder="Production Key"><div class="modal" id="modal-change-password">
+      </div><div class="modal" id="modal-change-password">
   <h3 id="modal-change-password-title">Change Password</h3>
   <div class="field"><label>Current Password</label><input id="modal-change-current" type="password" placeholder="Enter current password"></div>
   <div class="field"><label>New Password</label><input id="modal-change-new" type="password" placeholder="Enter new password"></div>
@@ -217,7 +223,11 @@ nav{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
     <button class="btn-ghost" id="modal-change-cancel">Cancel</button>
     <button class="btn-primary" id="modal-change-save">Save</button>
   </div>
-</div></div>
+</div>
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <h3 id="modal-title">Add Token</h3>
+    <div class="field"><label>Name</label><input id="modal-name" placeholder="Production Key"></div>
     <div class="field"><label id="modal-cred-label">Token</label><input id="modal-cred" type="password" placeholder="paste token"></div>
     <div class="field"><label>Priority (lower = tried first)</label><input id="modal-priority" type="number" value="1" min="1"></div>
     <div id="modal-validate-result"></div>
@@ -241,6 +251,8 @@ function showPage(id){
   const nav=document.querySelector('.nav-item[data-page="'+id+'"]'); if(nav) nav.classList.add("active");
   const titles={dashboard:"Dashboard",providers:"Providers",chat:"Basic Chat",settings:"Settings"};
   $("page-title").textContent=titles[id]||id;
+  const es=$("dashboard-empty");
+  if(es) es.classList.toggle("visible",CONNS.length===0&&id==="dashboard");
 }
 
 document.querySelectorAll(".nav-item").forEach(n=>n.addEventListener("click",()=>{showPage(n.dataset.page);sidebarEl.classList.remove("open");overlayEl.classList.remove("open");}));
@@ -367,17 +379,11 @@ async function checkPasswordStatus() {
 }
 
 function showChangePasswordModal() {
-  const modal = document.getElementById('modal-change-password');
-  const overlay = document.getElementById('modal-overlay');
-  modal.classList.add('open'); // We don't have a class for open? We'll use the same as the other modal: we'll add a class 'open' to the modal and set the overlay to open.
-  overlay.classList.add('open');
+  document.getElementById('modal-change-password').classList.add('open');
 }
 
 function hideChangePasswordModal() {
-  const modal = document.getElementById('modal-change-password');
-  const overlay = document.getElementById('modal-overlay');
-  modal.classList.remove('open');
-  overlay.classList.remove('open');
+  document.getElementById('modal-change-password').classList.remove('open');
 }
 
 // Handle change password modal form

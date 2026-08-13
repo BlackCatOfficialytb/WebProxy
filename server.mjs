@@ -320,7 +320,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;b
 .loading.show{display:block}
 .loading-spinner{width:24px;height:24px;border:2px solid var(--border-subtle);border-top-color:var(--brand);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 8px}
 @keyframes spin{to{transform:rotate(360deg)}}
-.hint{font-size:0.75rem;color:var(--text-muted);text-align:center;margin-top:16px}
+.hint{font-size:0.75rem;color:var(--text-muted);text-align:center;margin-top:16px;word-break:break-word;overflow-wrap:break-word;padding:0 8px;max-width:100%}
 </style>
 </head>
 <body>
