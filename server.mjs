@@ -396,7 +396,22 @@ const SEC_HEADERS = {
   "X-Frame-Options": "DENY",
   "X-XSS-Protection": "1; mode=block",
   "Referrer-Policy": "no-referrer",
+  "Content-Security-Policy": "default-src 'self'; style-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; connect-src 'self'",
 };
+
+// CSRF check — for cookie-authenticated state-changing requests only.
+// Bearer-token auth is inherently CSRF-safe (browsers don't auto-send it).
+function csrfSafe(req) {
+  if (req.headers.authorization?.startsWith("Bearer ")) return true;
+  const origin = req.headers.origin || req.headers.referer || "";
+  if (!origin) return false;
+  try {
+    const u = new URL(origin);
+    return u.hostname === HOST && String(u.port) === String(PORT);
+  } catch {
+    return false;
+  }
+}
 
 // Login rate limiting (brute-force protection)
 const LOGIN_MAX_ATTEMPTS = 10;
@@ -431,6 +446,9 @@ const server = http.createServer(async (req, res) => {
     return handleChat(req, res);
   }
   if (path === "/api/connections" || /^\/api\/connections\/[^/]+\/\d+/.test(path)) {
+    if (!csrfSafe(req)) {
+      return sendJson(res, 403, { error: { message: "CSRF check failed — missing or mismatched Origin/Referer" } });
+    }
     if (req.method === "DELETE") {
       const m = path.match(/^\/api\/connections\/([^/]+)\/(\d+)$/);
       if (m) return handleDeleteCredential(req, res, safeDecode(m[1]), Number(m[2]));
@@ -482,6 +500,9 @@ const server = http.createServer(async (req, res) => {
 
   // Change password endpoint
   if (req.method === "PATCH" && path === "/api/auth/password") {
+    if (!csrfSafe(req)) {
+      return sendJson(res, 403, { error: { message: "CSRF check failed" } });
+    }
     const authed = await requireAuth(req);
     if (!authed) {
       return sendJson(res, 401, { error: { message: "Unauthorized" } });
