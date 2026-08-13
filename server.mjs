@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import db from "./db.mjs";
 import { PROVIDERS, BY_ID } from "./providers/index.mjs";
 import { renderUI } from "./ui.mjs";
-import { initializePasswordAuth, requireAuth, createAuthToken, invalidateSession, hasAdminPassword, hashPassword, verifyPassword, getPasswordHash } from "./auth.mjs";
+import { initializePasswordAuth, requireAuth, isAuthenticated, createAuthToken, invalidateSession, hasAdminPassword, hashPassword, verifyPassword, getPasswordHash } from "./auth.mjs";
 import { setSetting } from "./db.mjs";
 
 const PORT = Number(process.env.PORT) || 16769;
@@ -146,6 +146,16 @@ function maskCred(c) {
   const s = String(c || "");
   if (s.length <= 12) return "•".repeat(s.length);
   return s.slice(0, 6) + "•".repeat(6) + s.slice(-4);
+}
+
+// decodeURIComponent throws on malformed escapes (e.g. `%zz`) — wrap it so a
+// bad path param can never crash a request handler into an unhandled rejection.
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }
 
 function listConnections() {
@@ -404,12 +414,12 @@ const server = http.createServer(async (req, res) => {
   if (path === "/api/connections" || /^\/api\/connections\/[^/]+\/\d+/.test(path)) {
     if (req.method === "DELETE") {
       const m = path.match(/^\/api\/connections\/([^/]+)\/(\d+)$/);
-      if (m) return handleDeleteCredential(req, res, decodeURIComponent(m[1]), Number(m[2]));
+      if (m) return handleDeleteCredential(req, res, safeDecode(m[1]), Number(m[2]));
       return sendJson(res, 405, { error: { message: "Method not allowed" } });
     }
     if (req.method === "POST") {
       const m = path.match(/^\/api\/connections\/([^/]+)\/(\d+)\/test$/);
-      if (m) return handleTestCredential(req, res, decodeURIComponent(m[1]), Number(m[2]));
+      if (m) return handleTestCredential(req, res, safeDecode(m[1]), Number(m[2]));
     }
     return handleConnections(req, res);
   }
