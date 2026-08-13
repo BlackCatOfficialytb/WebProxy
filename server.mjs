@@ -369,6 +369,25 @@ const SEC_HEADERS = {
   "Referrer-Policy": "no-referrer",
 };
 
+// Login rate limiting (brute-force protection)
+const LOGIN_MAX_ATTEMPTS = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const loginAttempts = new Map();
+function loginAllowed(ip) {
+  const rec = loginAttempts.get(ip);
+  if (!rec || Date.now() > rec.resetAt) return true;
+  return rec.count < LOGIN_MAX_ATTEMPTS;
+}
+function loginFailed(ip) {
+  const now = Date.now();
+  const rec = loginAttempts.get(ip);
+  if (!rec || now > rec.resetAt) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+  } else {
+    rec.count++;
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   for (const [k, v] of Object.entries(SEC_HEADERS)) res.setHeader(k, v);
 
@@ -397,14 +416,19 @@ const server = http.createServer(async (req, res) => {
 
   // Login endpoint — verifies password and sets an HttpOnly session cookie.
   if (req.method === "POST" && path === "/api/auth/login") {
+    const ip = req.socket.remoteAddress || "unknown";
+    if (!loginAllowed(ip)) {
+      return sendJson(res, 429, { error: { message: "Too many login attempts. Try again later." } });
+    }
     const authed = await requireAuth(req);
     if (!authed) {
       let loginBody;
       try { loginBody = await readBody(req); } catch (e) { return sendJson(res, 400, { error: { message: e.message } }); }
       const password = String(loginBody.password || "");
       const isValid = await verifyPassword(password, await getPasswordHash());
-      if (!isValid) return sendJson(res, 401, { error: { message: "Invalid password" } });
+      if (!isValid) { loginFailed(ip); return sendJson(res, 401, { error: { message: "Invalid password" } }); }
     }
+    loginAttempts.delete(ip);
     const sid = createAuthToken();
     const secure = !(HOST === "127.0.0.1" || HOST === "::1" || HOST === "localhost");
     res.setHeader("Set-Cookie", `webproxy_session=${sid}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure ? "; Secure" : ""}`);
