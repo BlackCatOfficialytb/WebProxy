@@ -527,8 +527,9 @@ const server = http.createServer(async (req, res) => {
     }
   }
   if (req.method === "GET" && (path === "/" || path === "/index.html")) {
+    const authed = await requireAuth(req);
     res.writeHead(200, { "Content-Type": "text/html" });
-    return res.end(uiHtml());
+    return res.end(authed ? uiHtml() : renderLoginUi());
   }
   if (path === "/favicon.ico") return res.writeHead(204).end();
   return sendJson(res, 404, { error: { message: `Not found: ${path}` } });
