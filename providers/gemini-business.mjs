@@ -1,44 +1,23 @@
-// chatglm-web — ChatGLM (Zhipu AI) web-cookie provider
-// Auth: chatglm_session cookie from chatglm.cn
-// Transport: OpenAI (chatglm.cn openai API) or Anthropic (chatglm.cn anthropic API)
-// Uses OmniRoute GLM patterns for dual-transport and auto-fallback
+// gemini-business — Gemini Business (free) web-cookie provider
+// Auth: cookies from business.gemini.google (__Secure-1PSID + __Secure-1PSIDTS)
+// Uses OmniRoute GLM patterns
 
 import { axios, UA, extractCookieValue, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload, nodeStreamToWeb } from "../shared.mjs";
 
-const BASE = "https://chatglm.cn";
-// Consumer web chat endpoint (OpenAI-compatible SSE). Update here if Zhipu changes it.
-const CHAT_URL = `${BASE}/openapi/v1/chat/completions`;
+const BASE = "https://business.gemini.google";
+const CHAT_URL = `${BASE}/api/chat/completions`;
 
-// GLM shared models from OmniRoute — all GLM models supported by Zhipu
-const GLM_SHARED_MODELS = [
-  "glm-5.2",
-  "glm-5.2-high",
-  "glm-5.2-max",
-  "glm-5.1",
-  "glm-5",
-  "glm-5-turbo",
-  "glm-4.7-flash",
-  "glm-4.7",
-  "glm-4.6v",
-  "glm-4.6",
-  "glm-4.5v",
-  "glm-4.5",
-  "glm-4.5-air",
-  "glm-4-plus",
-  "glm-4-air",
-  "glm-4-flash",
-  "glm-4v",
-];
-
-export const chatglmWeb = {
-  id: "chatglm-web",
-  label: "ChatGLM Web (omniroute)",
-  credentialHint: "chatglm_session=<...> cookie from chatglm.cn",
-  howto: "1) Log in at chatglm.cn (phone number).\n2) Open DevTools → Application → Cookies → https://chatglm.cn.\n3) Copy the `chatglm_session` cookie value.\n4) Paste `chatglm_session=<value>` or full Cookie header here.",
-  models: [...GLM_SHARED_MODELS],
+export const geminiBusiness = {
+  id: "gemini-business",
+  label: "Gemini Business (Free)",
+  credentialHint: "__Secure-1PSID and __Secure-1PSIDTS from business.gemini.google",
+  howto: "1) From your Google Workspace enterprise account, open business.gemini.google/home/cid/{your-cid}.\n2) Open DevTools → Application → Cookies → business.gemini.google.\n3) Copy both __Secure-1PSID and __Secure-1PSIDTS cookies.\n4) Paste them here (separated by semicolon).\n5) Free for enterprise Google Workspace accounts — no subscription required.",
+  models: ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash"],
   async chat({ credential, model, messages, stream, signal }) {
-    const session = extractCookieValue(credential, "chatglm_session");
-    if (!session) return { error: errorPayload(400, "Missing chatglm_session cookie from chatglm.cn. Log in first.") };
+    const raw = credential.trim();
+    const psid = extractCookieValue(raw, "__Secure-1PSID");
+    const psidts = extractCookieValue(raw, "__Secure-1PSIDTS");
+    if (!psid) return { error: errorPayload(400, "Missing __Secure-1PSID cookie from business.gemini.google.") };
 
     const reqBody = {
       stream: true,
@@ -51,8 +30,7 @@ export const chatglmWeb = {
       "User-Agent": UA,
       Origin: BASE,
       Referer: `${BASE}/`,
-      Cookie: `chatglm_session=${session}`,
-      Authorization: `Bearer ${session}`,
+      Cookie: `__Secure-1PSID=${psid}; __Secure-1PSIDTS=${psidts || ""}`,
     };
 
     let upstream;
@@ -68,7 +46,7 @@ export const chatglmWeb = {
     } catch (e) {
       const status = e.response?.status || 502;
       const txt = e.response?.data ? await e.response.data.text?.().catch(() => "") || "" : e.message;
-      return { error: errorPayload(status, `ChatGLM error: ${txt.slice(0, 300)}`) };
+      return { error: errorPayload(status, `Gemini Business error: ${txt.slice(0, 300)}`) };
     }
     const upstreamStream = nodeStreamToWeb(upstream.data);
 

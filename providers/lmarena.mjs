@@ -1,44 +1,21 @@
-// chatglm-web — ChatGLM (Zhipu AI) web-cookie provider
-// Auth: chatglm_session cookie from chatglm.cn
-// Transport: OpenAI (chatglm.cn openai API) or Anthropic (chatglm.cn anthropic API)
-// Uses OmniRoute GLM patterns for dual-transport and auto-fallback
+// lmarena — Arena (free) web-cookie provider
+// Auth: cookie from arena.ai
+// Uses OmniRoute GLM patterns
 
 import { axios, UA, extractCookieValue, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload, nodeStreamToWeb } from "../shared.mjs";
 
-const BASE = "https://chatglm.cn";
-// Consumer web chat endpoint (OpenAI-compatible SSE). Update here if Zhipu changes it.
-const CHAT_URL = `${BASE}/openapi/v1/chat/completions`;
+const BASE = "https://arena.ai";
+const CHAT_URL = `${BASE}/api/chat/completions`;
 
-// GLM shared models from OmniRoute — all GLM models supported by Zhipu
-const GLM_SHARED_MODELS = [
-  "glm-5.2",
-  "glm-5.2-high",
-  "glm-5.2-max",
-  "glm-5.1",
-  "glm-5",
-  "glm-5-turbo",
-  "glm-4.7-flash",
-  "glm-4.7",
-  "glm-4.6v",
-  "glm-4.6",
-  "glm-4.5v",
-  "glm-4.5",
-  "glm-4.5-air",
-  "glm-4-plus",
-  "glm-4-air",
-  "glm-4-flash",
-  "glm-4v",
-];
-
-export const chatglmWeb = {
-  id: "chatglm-web",
-  label: "ChatGLM Web (omniroute)",
-  credentialHint: "chatglm_session=<...> cookie from chatglm.cn",
-  howto: "1) Log in at chatglm.cn (phone number).\n2) Open DevTools → Application → Cookies → https://chatglm.cn.\n3) Copy the `chatglm_session` cookie value.\n4) Paste `chatglm_session=<value>` or full Cookie header here.",
-  models: [...GLM_SHARED_MODELS],
+export const lmarena = {
+  id: "lmarena",
+  label: "Arena Web (Free)",
+  credentialHint: "cookie from arena.ai (include arena-auth-prod-v1.0)",
+  howto: "1) Open arena.ai in your browser.\n2) Log in (free — no subscription required).\n3) Open DevTools → Network → any request → Request Headers → Cookie.\n4) Copy the full Cookie header value.\n5) Paste it here (include arena-auth-prod-v1.0, cf_clearance, etc.)",
+  models: ["claude-opus-4-8", "claude-sonnet-4-6", "gemini-3-flash", "gpt-5.6", "deepseek-v3"],
   async chat({ credential, model, messages, stream, signal }) {
-    const session = extractCookieValue(credential, "chatglm_session");
-    if (!session) return { error: errorPayload(400, "Missing chatglm_session cookie from chatglm.cn. Log in first.") };
+    const cookie = credential.trim();
+    if (!cookie) return { error: errorPayload(400, "Missing cookie from arena.ai. Log in and copy your Cookie header.") };
 
     const reqBody = {
       stream: true,
@@ -51,8 +28,7 @@ export const chatglmWeb = {
       "User-Agent": UA,
       Origin: BASE,
       Referer: `${BASE}/`,
-      Cookie: `chatglm_session=${session}`,
-      Authorization: `Bearer ${session}`,
+      Cookie: cookie,
     };
 
     let upstream;
@@ -68,7 +44,7 @@ export const chatglmWeb = {
     } catch (e) {
       const status = e.response?.status || 502;
       const txt = e.response?.data ? await e.response.data.text?.().catch(() => "") || "" : e.message;
-      return { error: errorPayload(status, `ChatGLM error: ${txt.slice(0, 300)}`) };
+      return { error: errorPayload(status, `Arena error: ${txt.slice(0, 300)}`) };
     }
     const upstreamStream = nodeStreamToWeb(upstream.data);
 

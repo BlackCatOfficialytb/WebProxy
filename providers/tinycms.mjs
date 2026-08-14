@@ -1,44 +1,21 @@
-// chatglm-web — ChatGLM (Zhipu AI) web-cookie provider
-// Auth: chatglm_session cookie from chatglm.cn
-// Transport: OpenAI (chatglm.cn openai API) or Anthropic (chatglm.cn anthropic API)
-// Uses OmniRoute GLM patterns for dual-transport and auto-fallback
+// tinycms-web — TinyCMS (free) web-cookie provider
+// Auth: local storage from site.tinycms.xyz
+// Uses OmniRoute GLM patterns
 
 import { axios, UA, extractCookieValue, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload, nodeStreamToWeb } from "../shared.mjs";
 
-const BASE = "https://chatglm.cn";
-// Consumer web chat endpoint (OpenAI-compatible SSE). Update here if Zhipu changes it.
-const CHAT_URL = `${BASE}/openapi/v1/chat/completions`;
+const BASE = "https://site.tinycms.xyz";
+const CHAT_URL = `${BASE}/api/chat/completions`;
 
-// GLM shared models from OmniRoute — all GLM models supported by Zhipu
-const GLM_SHARED_MODELS = [
-  "glm-5.2",
-  "glm-5.2-high",
-  "glm-5.2-max",
-  "glm-5.1",
-  "glm-5",
-  "glm-5-turbo",
-  "glm-4.7-flash",
-  "glm-4.7",
-  "glm-4.6v",
-  "glm-4.6",
-  "glm-4.5v",
-  "glm-4.5",
-  "glm-4.5-air",
-  "glm-4-plus",
-  "glm-4-air",
-  "glm-4-flash",
-  "glm-4v",
-];
-
-export const chatglmWeb = {
-  id: "chatglm-web",
-  label: "ChatGLM Web (omniroute)",
-  credentialHint: "chatglm_session=<...> cookie from chatglm.cn",
-  howto: "1) Log in at chatglm.cn (phone number).\n2) Open DevTools → Application → Cookies → https://chatglm.cn.\n3) Copy the `chatglm_session` cookie value.\n4) Paste `chatglm_session=<value>` or full Cookie header here.",
-  models: [...GLM_SHARED_MODELS],
+export const tinycmsWeb = {
+  id: "tinycms-web",
+  label: "TinyCMS (Free)",
+  credentialHint: "app-config-uuid from site.tinycms.xyz (localStorage)",
+  howto: "1) Go to site.tinycms.xyz in your browser.\n2) Open DevTools → Application → Local Storage → site.tinycms.xyz.\n3) Copy the value of 'app-config-uuid' (starts with 'R').\n4) Paste it here.\n5) Free tier has access to GPT 5.4, Gemini 3.5, Grok 4.20 — no login required.",
+  models: ["gpt-5.4", "gemini-3.5", "grok-4.20"],
   async chat({ credential, model, messages, stream, signal }) {
-    const session = extractCookieValue(credential, "chatglm_session");
-    if (!session) return { error: errorPayload(400, "Missing chatglm_session cookie from chatglm.cn. Log in first.") };
+    const uuid = credential.trim();
+    if (!uuid) return { error: errorPayload(400, "Missing app-config-uuid from site.tinycms.xyz. Open DevTools → Application → Local Storage.") };
 
     const reqBody = {
       stream: true,
@@ -51,8 +28,7 @@ export const chatglmWeb = {
       "User-Agent": UA,
       Origin: BASE,
       Referer: `${BASE}/`,
-      Cookie: `chatglm_session=${session}`,
-      Authorization: `Bearer ${session}`,
+      "X-UUID": uuid,
     };
 
     let upstream;
@@ -68,7 +44,7 @@ export const chatglmWeb = {
     } catch (e) {
       const status = e.response?.status || 502;
       const txt = e.response?.data ? await e.response.data.text?.().catch(() => "") || "" : e.message;
-      return { error: errorPayload(status, `ChatGLM error: ${txt.slice(0, 300)}`) };
+      return { error: errorPayload(status, `TinyCMS error: ${txt.slice(0, 300)}`) };
     }
     const upstreamStream = nodeStreamToWeb(upstream.data);
 

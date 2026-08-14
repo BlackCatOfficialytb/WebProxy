@@ -1,44 +1,23 @@
-// chatglm-web — ChatGLM (Zhipu AI) web-cookie provider
-// Auth: chatglm_session cookie from chatglm.cn
-// Transport: OpenAI (chatglm.cn openai API) or Anthropic (chatglm.cn anthropic API)
-// Uses OmniRoute GLM patterns for dual-transport and auto-fallback
+// muse-spark-web — Muse Spark (free) web-cookie provider
+// Auth: cookie + WS token from meta.ai
+// Uses OmniRoute GLM patterns
 
 import { axios, UA, extractCookieValue, makeSseStream, jsonCompletion, jsonLinesFromSse, errorPayload, nodeStreamToWeb } from "../shared.mjs";
 
-const BASE = "https://chatglm.cn";
-// Consumer web chat endpoint (OpenAI-compatible SSE). Update here if Zhipu changes it.
-const CHAT_URL = `${BASE}/openapi/v1/chat/completions`;
+const BASE = "https://www.meta.ai";
+const CHAT_URL = `${BASE}/api/chat/completions`;
 
-// GLM shared models from OmniRoute — all GLM models supported by Zhipu
-const GLM_SHARED_MODELS = [
-  "glm-5.2",
-  "glm-5.2-high",
-  "glm-5.2-max",
-  "glm-5.1",
-  "glm-5",
-  "glm-5-turbo",
-  "glm-4.7-flash",
-  "glm-4.7",
-  "glm-4.6v",
-  "glm-4.6",
-  "glm-4.5v",
-  "glm-4.5",
-  "glm-4.5-air",
-  "glm-4-plus",
-  "glm-4-air",
-  "glm-4-flash",
-  "glm-4v",
-];
-
-export const chatglmWeb = {
-  id: "chatglm-web",
-  label: "ChatGLM Web (omniroute)",
-  credentialHint: "chatglm_session=<...> cookie from chatglm.cn",
-  howto: "1) Log in at chatglm.cn (phone number).\n2) Open DevTools → Application → Cookies → https://chatglm.cn.\n3) Copy the `chatglm_session` cookie value.\n4) Paste `chatglm_session=<value>` or full Cookie header here.",
-  models: [...GLM_SHARED_MODELS],
+export const museSparkWeb = {
+  id: "muse-spark-web",
+  label: "Muse Spark (Free)",
+  credentialHint: "ecto_1_sess cookie AND ecto1: WS auth token from meta.ai",
+  howto: "1) Open meta.ai in your browser.\n2) Log in (Meta AI platform — Llama models, free).\n3) Open DevTools → Network → WS → find the 'clippy' request → Authorization query param.\n4) Copy the ecto1: token AND the ecto_1_sess cookie.\n5) Paste as `ecto_1_sess=<...>; ecto1:<...>` here.",
+  models: ["llama-4", "llama-3.3-70b", "llama-3.1-405b"],
   async chat({ credential, model, messages, stream, signal }) {
-    const session = extractCookieValue(credential, "chatglm_session");
-    if (!session) return { error: errorPayload(400, "Missing chatglm_session cookie from chatglm.cn. Log in first.") };
+    const raw = credential.trim();
+    const sess = extractCookieValue(raw, "ecto_1_sess");
+    const wsToken = extractCookieValue(raw, "ecto1");
+    if (!sess) return { error: errorPayload(400, "Missing ecto_1_sess cookie from meta.ai. Log in and capture the WS token.") };
 
     const reqBody = {
       stream: true,
@@ -51,8 +30,7 @@ export const chatglmWeb = {
       "User-Agent": UA,
       Origin: BASE,
       Referer: `${BASE}/`,
-      Cookie: `chatglm_session=${session}`,
-      Authorization: `Bearer ${session}`,
+      Cookie: `ecto_1_sess=${sess}; ${wsToken ? `ecto1=${wsToken}` : ""}`,
     };
 
     let upstream;
@@ -68,7 +46,7 @@ export const chatglmWeb = {
     } catch (e) {
       const status = e.response?.status || 502;
       const txt = e.response?.data ? await e.response.data.text?.().catch(() => "") || "" : e.message;
-      return { error: errorPayload(status, `ChatGLM error: ${txt.slice(0, 300)}`) };
+      return { error: errorPayload(status, `Meta AI error: ${txt.slice(0, 300)}`) };
     }
     const upstreamStream = nodeStreamToWeb(upstream.data);
 
